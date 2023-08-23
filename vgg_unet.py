@@ -1,3 +1,28 @@
+import time
+
+def TicTocGenerator():
+    # Generator that returns time differences
+    ti = 0           # initial time
+    tf = time.time() # final time
+    while True:
+        ti = tf
+        tf = time.time()
+        yield tf-ti # returns the time difference
+
+TicToc = TicTocGenerator() # create an instance of the TicTocGen generator
+
+# This will be the main function through which we define both tic() and toc()
+def toc(tempBool=True, message = "" ):
+    # Prints the time difference yielded by generator instance TicToc
+    tempTimeInterval = next(TicToc)
+    if tempBool:
+        print( f"Elapsed time {message}: {tempTimeInterval} seconds.\n" )
+
+def tic():
+    # Records a time in TicToc, marks the beginning of a time interval
+    toc(False)
+
+tic()
 import logging
 from pathlib import Path
 import torch
@@ -14,22 +39,24 @@ import os
 import pandas as pd
 from torchvision.io import read_image
 from torch.utils.data import Dataset
-import psutil
 from utils import balanced_focal_cross_entropy_loss
 import torchvision.models as models
 from parts import *
 from evaluate import *
+from datasets import *
+
 from torchvision import datasets, transforms, models
 import itertools
 import numpy as np
+toc(message="Import end")
 
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.cuda.manual_seed_all(12345)
 OS='windows'
 
 def os_support_path(path):
-  if OS=="windows":
-    return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
+    if OS=="windows":
+        return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
 
 
 """#Model"""
@@ -100,69 +127,9 @@ class UNet(nn.Module):
 
 
 
-class DDSMImageDataset(Dataset):
-    def __init__(self, img_dir, mask_dir, transform=None, target_transform=None, phase_train = True):
-        data_files = list(os.walk(img_dir, topdown=False))[0][2][::-1]
-        mask_files = list(os.walk(mask_dir, topdown=False))[0][2][::-1]
-        self.transform=transform
-        self.target_transform=transform
-        filter_phase=lambda x :not 'Test' in x if phase_train  else   ('Test' in x)
-        self.img_dir=img_dir
-        self.mask_dir=mask_dir
-        self.data=list(filter(filter_phase,data_files))
-        self.mask=list(filter(filter_phase,mask_files))
-    def __len__(self):
-        return len(self.data)
 
-    def __getitem__(self, idx):
-        # get paths form data[idx] and load mask and image and apply necessary transforms on it
-        image = np.load(os.path.join(self.img_dir, self.data[idx]))['arr_0']
-        label = np.load(os.path.join(self.mask_dir, self.mask[idx]))['arr_0']
-        if self.transform:
-            image = self.transform(image)
-
-        if self.target_transform:
-            label = self.target_transform(label)*255
-        return image, label
-
-
-class VinImageDataset(Dataset):
-    def __init__(self, img_dir, mask_dir, transform=None, target_transform=None, phase_train = True):
-        data_files = list(os.walk(img_dir, topdown=False))[0][2][::-1][8100:]
-        mask_files = list(os.walk(mask_dir, topdown=False))[0][2][::-1][8100:]
-        self.transform=transform
-        self.target_transform=transform
-        filter_phase=lambda x :not 'Test' in x if phase_train  else   ('Test' in x)
-        self.img_dir=img_dir
-        self.mask_dir=mask_dir
-        self.data=list(filter(filter_phase,data_files))
-        self.mask=list(filter(filter_phase,mask_files))
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        # get paths form data[idx] and load mask and image and apply necessary transforms on it
-        image = np.load(os.path.join(self.img_dir, self.data[idx]))['arr_0']
-        label = np.load(os.path.join(self.mask_dir, self.mask[idx]))['arr_0']
-        if self.transform:
-            image = self.transform(image)
-
-        if self.target_transform:
-            label = self.target_transform(label).float() / 255.0
-        return image, label
 
 #assume source is greater than b
-def merge_loaders(loader_a, loader_b):
-    loader_a_iter = iter(loader_a)
-    loader_b_iter = iter(loader_b)
-    while True:
-        try:
-            yield (next(loader_a_iter),"S")
-        except StopIteration:
-            loader_a_iter = iter(loader_a)
-            yield (next(loader_a_iter),"S")
-
-        yield (next(loader_b_iter),"T")
 
 # def train_model(
 #         model,
@@ -183,6 +150,34 @@ def merge_loaders(loader_a, loader_b):
     #     dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
     # except (AssertionError, RuntimeError, IndexError):
     #     dataset = BasicDataset(dir_img, dir_mask, img_scale)
+    
+from torch.nn.utils.rnn import pad_sequence
+
+def collate_fn(batch):
+    images, masks, labels = zip(*batch)
+    
+    # Stack images and masks
+    # Note: images and masks should be torch.Tensors
+
+    images = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in images]
+    images = torch.stack(images)
+    masks = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in masks]
+    masks = torch.stack(masks)
+    # Pad labels if they are sequences of different lengths,
+    # or simply stack them if they are of the same length
+    if isinstance(labels[0], torch.Tensor):
+        if labels[0].shape == torch.Size([]):  # labels are scalar
+            labels = torch.stack(labels, 0)
+        else:  # labels are sequences
+            labels = pad_sequence(labels, batch_first=True)
+    else:
+        # Convert labels to tensor if they are not
+        labels = torch.tensor(labels)
+
+
+    return images, masks, labels
+
+# Use the new collate function in DataLoader
 def train_model(
         model,
         device,
@@ -200,27 +195,53 @@ def train_model(
 
     data_transforms = transforms.Compose([transforms.ToTensor()])
     target_tr = transforms.Compose([transforms.ToTensor()])
-    train_dataset=DDSMImageDataset( img_dir=os_support_path("DDSM/data/512"), mask_dir=os_support_path("./DDSM/mask/512"),transform=target_tr,target_transform=target_tr,phase_train = True)
-    # 2. Split into train / validation partitions
+    train_dataset=MergedDataset( img_dir_1=os_support_path("Vin/data/512"), 
+                                mask_dir_1=os_support_path("Vin/mask/512"),
+                                 img_dir_2=os_support_path("DDSM/data/512"), 
+                                mask_dir_2=os_support_path("DDSM/mask/512"),
+                                transform=target_tr,
+                                target_transform=target_tr,
+                                )
+
     n_train = int(len(train_dataset) * 0.85)
     n_val = len(train_dataset) - n_train
     train_set, val_set = torch.utils.data.random_split(train_dataset, [n_train, n_val])
-    # 3. Create data loaders
-    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
-    train_loader = torch.utils.data.DataLoader(dataset=train_set,shuffle=True, **loader_args)
-    validation_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args )
-    train_loader = DataLoader(train_set, shuffle=True, **loader_args)
-    val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
-    Vin_dataset=VinImageDataset( img_dir=os_support_path("Vin/data/512"), mask_dir=os_support_path("Vin/mask/512"),transform=data_transforms,target_transform=target_tr,phase_train = True)
-    Vin_loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
-    Vin_train_loader = torch.utils.data.DataLoader(dataset=Vin_dataset,shuffle=True, **Vin_loader_args)
-
+    loader_args = dict(batch_size=batch_size, num_workers=1, )
+    
+    train_loader = torch.utils.data.DataLoader(dataset=train_set,shuffle=False, **loader_args,collate_fn=collate_fn)
+    val_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args ,)
+    ##
+    # train_dataset=DDSMImageDataset( img_dir=os_support_path("DDSM/data/512"), mask_dir=os_support_path("./DDSM/mask/512"),transform=target_tr,target_transform=target_tr,phase_train = True)
+    # # 2. Split into train / validation partitions
+    # n_train = int(len(train_dataset) * 0.85)
+    # n_val = len(train_dataset) - n_train
+    # train_set, val_set = torch.utils.data.random_split(train_dataset, [n_train, n_val])
+    # # 3. Create data loaders
+    # loader_args = dict(batch_size=batch_size, num_workers=1, )
+    # train_loader = torch.utils.data.DataLoader(dataset=train_set,shuffle=True, **loader_args)
+    # validation_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args )
+    # train_loader = DataLoader(train_set, shuffle=True, **loader_args)
+    # val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
+    # Vin_dataset=VinImageDataset( img_dir=os_support_path("Vin/data/512"), mask_dir=os_support_path("Vin/mask/512"),transform=data_transforms,target_transform=target_tr,phase_train = True)
+    # Vin_loader_args = dict(batch_size=batch_size, num_workers=1, )
+    # Vin_train_loader = torch.utils.data.DataLoader(dataset=Vin_dataset,shuffle=True, **Vin_loader_args)
     ##
     # (Initialize logging)
-    experiment = wandb.init(project='DML',
-                            resume='allow',
-                            anonymous='must',
-                            # mode="disabled"
+    # def merge_loaders(loader_a, loader_b):
+    #     loader_a_iter = iter(loader_a)
+    #     loader_b_iter = iter(loader_b)
+    #     while True:
+    #         try:
+    #             yield (next(loader_a_iter),"S")
+    #         except StopIteration:
+    #             loader_a_iter = iter(loader_a)
+    #             yield (next(loader_a_iter),"S")
+
+    #         yield (next(loader_b_iter),"T")
+
+    experiment = wandb.init(project='Breast-vgg',
+                            
+                            # name="vgg_unet-with merged dataset"
                             )
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
@@ -229,13 +250,15 @@ def train_model(
             #  img_scale=img_scale,
              amp=amp)
     )
+    toc(message="after wandb init")
+
 
     # logging.info(f'''Starting training:
     #     Epochs:          {epochs}=
     #     Batch size:      {batch_size}
     #     Learning rate:   {learning_rate}
     #     Training size:   {n_train}
-    #     Validation size: {n_val}
+    #     Validation size: {n_val}5.078179597854614
     #     Device:          {device.type}
     #     Images scaling:  {img_scale}
     #     Mixed Precision: {amp}
@@ -264,25 +287,34 @@ def train_model(
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0
+        toc(message="before epoch start")
+
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
-            for batch,domain in merge_loaders(train_loader,Vin_train_loader):
-                images, true_masks = batch
+            for batch in train_loader:
+                images,true_masks,labels=batch
                 assert images.shape[1] == model.n_channels, \
                     f'Network has been defined with {model.n_channels} input channels, ' \
                     f'but loaded images have {images.shape[1]} channels. Please check that ' \
                     'the images are loaded correctly.'
-
-                images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+                images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last) # todo float check
                 true_masks = true_masks.to(device=device, dtype=torch.long)
-
+            
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-                    masks_pred,real_fake_pred = model(images)
+                    masks_pred,labels_pred = model(images)
+
                     # if model.n_classes == 1:
                     # loss = criterion(masks_pred.squeeze(1), true_masks.float())
+                    B,H,W=15,512,512
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                    loss1 = balanced_focal_cross_entropy_loss(F.sigmoid(masks_pred), true_masks ,focal_gamma=2).mean()
-
-                    loss2=criterion2(real_fake_pred, real_tensor if domain=="S" else fake_tensor )
+                    ignore_mask = labels.view(B, 1, 1, 1).expand(-1, 1, H, W).to(device=device,)
+                    loss1 = balanced_focal_cross_entropy_loss(probs=F.sigmoid(masks_pred),
+                                                              gt=true_masks ,
+                                                              ignore_mask=ignore_mask,
+                                                              focal_gamma=2
+                                                              )
+                    # print(labels_pred.squeeze(1).dtype, labels.to(dtype=torch.float32)) )
+                    loss2=criterion2(labels_pred.squeeze(1), labels.to(device=device,dtype=torch.float32 ))
+                    # print(loss1,loss2,domain)
                     # loss+= balanced_focal_cross_entropy_loss(F.sigmoid(masks_pred), true_masks ,focal_gamma=3,ignore_mask=(1-true_masks)).mean()
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float().squeeze(1), multiclass=False)
 
@@ -293,10 +325,8 @@ def train_model(
                     #         F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
                     #         multiclass=True
                     #     )
-                if domain=="S":
-                  loss=loss1+loss2
-                else :
-                  loss=loss2
+                
+                loss=loss1+loss2
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
@@ -313,12 +343,11 @@ def train_model(
                     'train loss_adv_source': loss2.item(),
                     'step': global_step,
                     'epoch': epoch,
-                    'domain':domain,
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
 
                 # Evaluation round
-                division_step = (n_train*5 // (batch_size))
+                division_step = (n_train // (3*batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
@@ -357,8 +386,11 @@ def train_model(
             state_dict['mask_values'] = dataset.mask_values
             torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
             logging.info(f'Checkpoint {epoch} saved!')
+# do stuff
+
 
 if __name__ == '__main__':    
+
     img_dir=os_support_path("Vin/data/512")
     dir_img = Path(os_support_path('DDSM/data/512/'))
     dir_mask = Path(os_support_path('DDSM/mask/512/'))
@@ -374,7 +406,7 @@ if __name__ == '__main__':
     args.scale=1
     args.batch_size=15
     args.bilinear=False
-    args.epochs=1
+    args.epochs=2
     args.lr=1e-4
     args.val=15
     args.amp=False
@@ -385,6 +417,7 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
+
     model = UNet(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
 
@@ -400,6 +433,7 @@ if __name__ == '__main__':
         logging.info(f'Model loaded from {args.load}')
 
     model.to(device=device)
+
     train_model(
         model=model,
         epochs=args.epochs,
