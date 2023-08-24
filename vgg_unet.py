@@ -209,7 +209,7 @@ def train_model(
     loader_args = dict(batch_size=batch_size, num_workers=1, )
     
     train_loader = torch.utils.data.DataLoader(dataset=train_set,shuffle=False, **loader_args,collate_fn=collate_fn)
-    val_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args ,)
+    val_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args ,collate_fn=collate_fn)
     ##
     # train_dataset=DDSMImageDataset( img_dir=os_support_path("DDSM/data/512"), mask_dir=os_support_path("./DDSM/mask/512"),transform=target_tr,target_transform=target_tr,phase_train = True)
     # # 2. Split into train / validation partitions
@@ -240,6 +240,7 @@ def train_model(
     #         yield (next(loader_b_iter),"T")
 
     experiment = wandb.init(project='Breast-vgg',
+                            mode="disabled"
                             
                             # name="vgg_unet-with merged dataset"
                             )
@@ -313,7 +314,8 @@ def train_model(
                                                               focal_gamma=2
                                                               )
                     # print(labels_pred.squeeze(1).dtype, labels.to(dtype=torch.float32)) )
-                    loss2=criterion2(labels_pred.squeeze(1), labels)
+                    loss2=0
+                    # loss2=balanced_focal_cross_entropy_loss(labels_pred.unsqueeze(2).unsqueeze(3), labels.unsqueeze(1).unsqueeze(2).unsqueeze(3))
                     # print(loss1,loss2,domain)
                     # loss+= balanced_focal_cross_entropy_loss(F.sigmoid(masks_pred), true_masks ,focal_gamma=3,ignore_mask=(1-true_masks)).mean()
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float().squeeze(1), multiclass=False)
@@ -346,7 +348,7 @@ def train_model(
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
 
                 # Evaluation round
-                division_step = (n_train // (3*batch_size))
+                division_step = (n_train // (2*batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
