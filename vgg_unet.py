@@ -298,26 +298,25 @@ def train_model(
                     'the images are loaded correctly.'
                 images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last) # todo float check
                 true_masks = true_masks.to(device=device, dtype=torch.long)
-            
+                labels=labels.to(device=device,dtype=torch.float32 )
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred,labels_pred = model(images)
 
                     # if model.n_classes == 1:
                     # loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                    B,H,W=15,512,512
+                    B,H,W=batch_size,512,512
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                    ignore_mask = labels.view(B, 1, 1, 1).expand(-1, 1, H, W).to(device=device,)
+                    ignore_mask = labels.view(B, 1, 1, 1).expand(-1, 1, H, W)
                     loss1 = balanced_focal_cross_entropy_loss(probs=F.sigmoid(masks_pred),
                                                               gt=true_masks ,
                                                               ignore_mask=ignore_mask,
                                                               focal_gamma=2
                                                               )
                     # print(labels_pred.squeeze(1).dtype, labels.to(dtype=torch.float32)) )
-                    loss2=criterion2(labels_pred.squeeze(1), labels.to(device=device,dtype=torch.float32 ))
+                    loss2=criterion2(labels_pred.squeeze(1), labels)
                     # print(loss1,loss2,domain)
                     # loss+= balanced_focal_cross_entropy_loss(F.sigmoid(masks_pred), true_masks ,focal_gamma=3,ignore_mask=(1-true_masks)).mean()
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float().squeeze(1), multiclass=False)
-
                     # else:
                     #     loss = criterion(masks_pred, true_masks)
                     #     loss += dice_loss(
