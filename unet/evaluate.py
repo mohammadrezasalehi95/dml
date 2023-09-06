@@ -3,8 +3,8 @@ from torch import Tensor
 import torch
 from torch.nn import functional as F
 import numpy as np
-
 from tqdm import tqdm
+
 def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon: float = 1e-6):
     # Average of Dice coefficient for all batches, or for a single mask
     assert input.size() == target.size()
@@ -39,13 +39,15 @@ def evaluate(net, dataloader, device, amp):
     # iterate over the validation set
     with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
         for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch', position=0,leave=False):
-            image, mask_true,labels = batch
+            image, mask_true = batch
+
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
             mask_true = mask_true.to(device=device, dtype=torch.long)
-            labels=labels.to(device=device,dtype=torch.float32 )
+
             # predict the mask
-            mask_pred,labels_pred = net(image)
+            mask_pred = net(image)
+
             if net.n_classes == 1:
                 assert mask_true.min() >= 0 and mask_true.max() <= 1, 'True mask indices should be in [0, 1]'
                 mask_pred = (F.sigmoid(mask_pred) > 0.5).float()
@@ -61,54 +63,3 @@ def evaluate(net, dataloader, device, amp):
 
     net.train()
     return dice_score / max(num_val_batches, 1)
-
-def evaluate2():
-        self._tp_per_class: List[float] = np.zeros((self._c,), dtype=int)
-        self._fp_per_class: List[float] = np.zeros_like(self._tp_per_class)
-        self._fn_per_class: List[float] = np.zeros_like(self._tp_per_class)
-
-
-        # fill this 
-        preds = self._read_model_seg_prediction(model_output)
-        ground_truths = self._read_gt_seg_prediction(model_output)
-       
-        # assuming 0 as background
-        for c in range(1, self._c):
-            preds_c = (preds == c).astype(int)
-            ground_truths_c = (ground_truths == c).astype(int)
-
-            for gt, pd in zip(ground_truths_c, preds_c):
-
-                self._n_received_samples += 1
- 
-                gt_labels = measure.label(gt)
-                pd_labels = measure.label(pd)
-
-                for l in np.unique(gt_labels):
-                    if l == 0:
-                        continue
-
-                    # if ground_truth obj has enough overlap with pred, it's captured
-                    gt_obj_mask = (gt_labels == l)
-
-                    # if l has any overlap with check mask, it's captured
-                    if np.sum(
-                            (gt_obj_mask & (pd == 1))) \
-                            * 1.0 / np.sum(gt_obj_mask) >= \
-                            tp_fn_threshold:
-                        self._tp_per_class[c] += 1
-                    else:
-                        self._fn_per_class[c] += 1
-               
-                for l in np.unique(pd_labels):
-                    if l == 0:
-                        continue
-
-                    pd_obj_mask = (pd_labels == l)
-
-                    # if l has any overlap with check mask, it's captured
-                    if 1.0 * np.sum(pd_obj_mask &
-                                (gt == 1)) / \
-                            np.sum(pd_obj_mask) < self._threshold:
-                        self._fp_per_class[c] += 1
-

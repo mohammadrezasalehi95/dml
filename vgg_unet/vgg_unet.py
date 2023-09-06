@@ -1,38 +1,20 @@
 import time
 
-def TicTocGenerator():
-    # Generator that returns time differences
-    ti = 0           # initial time
-    tf = time.time() # final time
-    while True:
-        ti = tf
-        tf = time.time()
-        yield tf-ti # returns the time difference
-
-TicToc = TicTocGenerator() # create an instance of the TicTocGen generator
-
-# This will be the main function through which we define both tic() and toc()
-def toc(tempBool=True, message = "" ):
-    # Prints the time difference yielded by generator instance TicToc
-    tempTimeInterval = next(TicToc)
-    if tempBool:
-        print( f"Elapsed time {message}: {tempTimeInterval} seconds.\n" )
-
-def tic():
-    # Records a time in TicToc, marks the beginning of a time interval
-    toc(False)
-
-tic()
+from torch.nn.utils.rnn import pad_sequence
 import logging
 from pathlib import Path
 import torch
 import torch.nn as nn
+from utils import Eval_FP
+
 import wandb
 from torch import Tensor
 from torch import optim
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+import random
+
 from torchvision import transforms
 from tqdm import tqdm
 import os
@@ -48,15 +30,10 @@ from datasets import *
 from torchvision import datasets, transforms, models
 import itertools
 import numpy as np
-toc(message="Import end")
+
 
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.cuda.manual_seed_all(12345)
-OS='windows'
-
-def os_support_path(path):
-    if OS=="windows":
-        return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
 
 
 """#Model"""
@@ -123,48 +100,18 @@ class UNet(nn.Module):
         self.up4 = torch.utils.checkpoint(self.up4)
         self.outc = torch.utils.checkpoint(self.outc)
 
-"""#Data sets"""
 
 
-
-
-
-#assume source is greater than b
-
-# def train_model(
-#         model,
-#         device,
-#         epochs: int = 5,
-#         batch_size: int = 1,
-#         learning_rate: float = 1e-5,
-#         val_percent: float = 0.1,
-#         save_checkpoint: bool = False,
-#         img_scale: float = 0.5,
-#         amp: bool = False,
-#         weight_decay: float = 1e-8,
-#         momentum: float = 0.999,
-#         gradient_clipping: float = 1.0,
-# ):
-    # # 1. Create dataset
-    # try:
-    #     dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
-    # except (AssertionError, RuntimeError, IndexError):
-    #     dataset = BasicDataset(dir_img, dir_mask, img_scale)
     
-from torch.nn.utils.rnn import pad_sequence
+
 
 def collate_fn(batch):
     images, masks, labels = zip(*batch)
-    
-    # Stack images and masks
-    # Note: images and masks should be torch.Tensors
-
     images = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in images]
     images = torch.stack(images)
     masks = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in masks]
     masks = torch.stack(masks)
-    # Pad labels if they are sequences of different lengths,
-    # or simply stack them if they are of the same length
+    
     if isinstance(labels[0], torch.Tensor):
         if labels[0].shape == torch.Size([]):  # labels are scalar
             labels = torch.stack(labels, 0)
@@ -173,10 +120,7 @@ def collate_fn(batch):
     else:
         # Convert labels to tensor if they are not
         labels = torch.tensor(labels)
-
-
     return images, masks, labels
-
 # Use the new collate function in DataLoader
 def train_model(
         model,
@@ -184,75 +128,57 @@ def train_model(
         epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-4,
-        val_percent: float = 0.15,
+        # val_percent: float = 0.15,
         save_checkpoint: bool = False,
+        dir_checkpoint:str='',
         img_scale: float = 1,
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
 ):
-
-    data_transforms = transforms.Compose([transforms.ToTensor()])
-    target_tr = transforms.Compose([transforms.ToTensor()])
-    train_dataset=MergedDataset( img_dir_1=os_support_path("Vin/data/512"), 
-                                mask_dir_1=os_support_path("Vin/mask/512"),
-                                 img_dir_2=os_support_path("DDSM/data/512"), 
-                                mask_dir_2=os_support_path("DDSM/mask/512"),
-                                transform=target_tr,
-                                target_transform=target_tr,
-                                )
-
-    n_train = int(len(train_dataset) * 0.85)
-    n_val = len(train_dataset) - n_train
-    train_set, val_set = torch.utils.data.random_split(train_dataset, [n_train, n_val])
-    loader_args = dict(batch_size=batch_size, num_workers=1, )
     
-    train_loader = torch.utils.data.DataLoader(dataset=train_set,shuffle=False, **loader_args,collate_fn=collate_fn)
-    val_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args ,collate_fn=collate_fn)
-    ##
-    # train_dataset=DDSMImageDataset( img_dir=os_support_path("DDSM/data/512"), mask_dir=os_support_path("./DDSM/mask/512"),transform=target_tr,target_transform=target_tr,phase_train = True)
-    # # 2. Split into train / validation partitions
-    # n_train = int(len(train_dataset) * 0.85)
-    # n_val = len(train_dataset) - n_train
-    # train_set, val_set = torch.utils.data.random_split(train_dataset, [n_train, n_val])
-    # # 3. Create data loaders
-    # loader_args = dict(batch_size=batch_size, num_workers=1, )
-    # train_loader = torch.utils.data.DataLoader(dataset=train_set,shuffle=True, **loader_args)
-    # validation_loader = torch.utils.data.DataLoader(dataset=val_set,shuffle=False,drop_last=True, **loader_args )
-    # train_loader = DataLoader(train_set, shuffle=True, **loader_args)
-    # val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
-    # Vin_dataset=VinImageDataset( img_dir=os_support_path("Vin/data/512"), mask_dir=os_support_path("Vin/mask/512"),transform=data_transforms,target_transform=target_tr,phase_train = True)
-    # Vin_loader_args = dict(batch_size=batch_size, num_workers=1, )
-    # Vin_train_loader = torch.utils.data.DataLoader(dataset=Vin_dataset,shuffle=True, **Vin_loader_args)
-    ##
-    # (Initialize logging)
-    # def merge_loaders(loader_a, loader_b):
-    #     loader_a_iter = iter(loader_a)
-    #     loader_b_iter = iter(loader_b)
-    #     while True:
-    #         try:
-    #             yield (next(loader_a_iter),"S")
-    #         except StopIteration:
-    #             loader_a_iter = iter(loader_a)
-    #             yield (next(loader_a_iter),"S")
-
-    #         yield (next(loader_b_iter),"T")
-
     experiment = wandb.init(project='Breast-vgg',
-                            mode="disabled"
+                            # mode="disabled",
                             
                             # name="vgg_unet-with merged dataset"
                             )
+
+    data_transforms = transforms.Compose([transforms.ToTensor()])
+    target_tr = transforms.Compose([transforms.ToTensor()])
+    train_dataset=MergedDataset( dir_1="Vin/", 
+                                dir_1_sep="Vin/sep/V1/",
+                                size="512/",
+                                dir_2="DDSM/", 
+                                dir_2_sep="DDSM/sep/ORG/",
+                                transform=target_tr,
+                                target_transform=target_tr,
+                                phase='train'
+                                # wandb_ex=experiment,
+                                )
+    val_dataset=MergedDataset( dir_1="Vin/", 
+                                dir_1_sep="Vin/sep/V1/",
+                                size="512/",
+                                dir_2="DDSM/", 
+                                dir_2_sep="DDSM/sep/ORG/",
+                                transform=target_tr,
+                                target_transform=target_tr,
+                                phase='val'
+                                # wandb_ex=experiment,
+                                )
+        
+    n_train = len(train_dataset)
+    n_val = len(val_dataset) 
+    
+    loader_args = dict(batch_size=batch_size, num_workers=1, )
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,shuffle=False, **loader_args,collate_fn=collate_fn)
+    val_loader = torch.utils.data.DataLoader(dataset=val_dataset,shuffle=False,drop_last=True, **loader_args ,collate_fn=collate_fn)
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             val_percent=val_percent,
              save_checkpoint=save_checkpoint,
             #  img_scale=img_scale,
              amp=amp)
     )
-    toc(message="after wandb init")
-
 
     # logging.info(f'''Starting training:
     #     Epochs:          {epochs}=
@@ -288,8 +214,6 @@ def train_model(
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0
-        toc(message="before epoch start")
-
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
                 images,true_masks,labels=batch
@@ -299,33 +223,29 @@ def train_model(
                     'the images are loaded correctly.'
                 images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last) # todo float check
                 true_masks = true_masks.to(device=device, dtype=torch.long)
+                
                 labels=labels.to(device=device,dtype=torch.float32 )
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred,labels_pred = model(images)
-
                     # if model.n_classes == 1:
                     # loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                    B,H,W=batch_size,512,512
+                    B,H,W=labels.shape[0],512,512
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
                     ignore_mask = labels.view(B, 1, 1, 1).expand(-1, 1, H, W)
+                    
                     loss1 = balanced_focal_cross_entropy_loss(probs=F.sigmoid(masks_pred),
                                                               gt=true_masks ,
                                                               ignore_mask=ignore_mask,
                                                               focal_gamma=2
-                                                              )
-                    # print(labels_pred.squeeze(1).dtype, labels.to(dtype=torch.float32)) )
-                    loss2=0
-                    # loss2=balanced_focal_cross_entropy_loss(labels_pred.unsqueeze(2).unsqueeze(3), labels.unsqueeze(1).unsqueeze(2).unsqueeze(3))
-                    # print(loss1,loss2,domain)
-                    # loss+= balanced_focal_cross_entropy_loss(F.sigmoid(masks_pred), true_masks ,focal_gamma=3,ignore_mask=(1-true_masks)).mean()
-                    # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float().squeeze(1), multiclass=False)
-                    # else:
-                    #     loss = criterion(masks_pred, true_masks)
-                    #     loss += dice_loss(
-                    #         F.softmax(masks_pred, dim=1).float(),
-                    #         F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
-                    #         multiclass=True
-                    #     )
+                                                              ).mean()
+                        
+                        
+
+                    loss2= balanced_focal_cross_entropy_loss(probs=labels_pred.unsqueeze(2).unsqueeze(3),
+                                                              gt= labels.unsqueeze(1).unsqueeze(2).unsqueeze(3),
+                                                              focal_gamma=2
+                                                              ).mean()/50
+                        
                 
                 loss=loss1+loss2
                 optimizer.zero_grad(set_to_none=True)
@@ -333,7 +253,6 @@ def train_model(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
-
                 pbar.update(images.shape[0])
 
                 global_step += 1
@@ -346,7 +265,6 @@ def train_model(
                     'epoch': epoch,
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-
                 # Evaluation round
                 division_step = (n_train // (2*batch_size))
                 if division_step > 0:
@@ -358,8 +276,7 @@ def train_model(
                                 histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
                             if value.grad is not None and not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
                                 histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
-
-                        val_score = evaluate(model, val_loader, device, amp)
+                        val_score,junk = evaluate(model, val_loader, device, amp)
                         # scheduler.step(val_score)
 
                         logging.info('Validation Dice score: {}'.format(val_score))
@@ -372,7 +289,7 @@ def train_model(
                                     'true': wandb.Image(true_masks[0].float().cpu()),
                                     'pred05': wandb.Image((F.sigmoid(masks_pred[0])>=0.5).float().cpu()),
                                     'pred07': wandb.Image((F.sigmoid(masks_pred[0])>=0.7).float().cpu()),
-                                    'real_fake':real_fake_pred[0].float().cpu()
+                                    'real_fake':labels_pred[0].float().cpu()
                                 },
                                 'step': global_step,
                                 'epoch': epoch,
@@ -380,37 +297,40 @@ def train_model(
                             })
                         except:
                             pass
-
+ 
+ 
         if save_checkpoint:
-            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+            Path(os_support_path(dir_checkpoint)).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()
-            state_dict['mask_values'] = dataset.mask_values
-            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
+            # state_dict['mask_values'] = dataset.mask_values
+            torch.save(state_dict, os_support_path(str(dir_checkpoint + '/checkpoint_epoch{}.pth'.format(epoch))))
             logging.info(f'Checkpoint {epoch} saved!')
 # do stuff
 
 
 if __name__ == '__main__':    
 
-    img_dir=os_support_path("Vin/data/512")
-    dir_img = Path(os_support_path('DDSM/data/512/'))
-    dir_mask = Path(os_support_path('DDSM/mask/512/'))
-    dir_checkpoint = Path(os_support_path('checkpoints/'))
+    # img_dir=os_support_path("Vin/data/512")
+    # dir_img = Path(os_support_path('DDSM/data/512/'))
+    # dir_mask = Path(os_support_path('DDSM/mask/512/'))
+    # dir_checkpoint = Path(os_support_path('checkpoints/'))
     class Temp:
       def __init__(self):
         pass
 
     args=Temp()
-    args.load = False
+    args.load = 'Model/vgg_unet/checkpoint_epoch10.pth'
     args.amp=False
     args.classes=1
     args.scale=1
-    args.batch_size=15
+    args.batch_size=2
     args.bilinear=False
-    args.epochs=2
-    args.lr=1e-4
+    args.epochs=10
+    args.lr=2e-5
     args.val=15
     args.amp=False
+    args.dir_checkpoint='Model/vgg_unet/02/'
+    args.save_checkpoint=True
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -428,20 +348,63 @@ if __name__ == '__main__':
                   f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
 
     if args.load:
-        state_dict = torch.load(args.load, map_location=device)
-        del state_dict['mask_values']
+        state_dict = torch.load(os_support_path(args.load), map_location=device)
+        if 'mask_values' in state_dict.keys():
+            del state_dict['mask_values']
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {args.load}')
 
     model.to(device=device)
+    
 
-    train_model(
-        model=model,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.lr,
-        device=device,
-        img_scale=args.scale,
-        val_percent=args.val / 100,
-        amp=args.amp
-    )
+    
+    val_dataset=MergedDataset( dir_1="Vin/", 
+                                dir_1_sep="Vin/sep/V1/",
+                                size="512/",
+                                dir_2="DDSM/", 
+                                dir_2_sep="DDSM/sep/ORG/",
+                                # transform=target_tr,
+                                # target_transform=target_tr,
+                                phase='val'
+                                # wandb_ex=experiment,
+                                )
+        
+    n_val = len(val_dataset) 
+    
+    loader_args = dict(batch_size=16, num_workers=1, )
+    val_loader = torch.utils.data.DataLoader(dataset=val_dataset,shuffle=False,drop_last=True, **loader_args ,collate_fn=collate_fn)
+    junk,eval=evaluate(model, val_loader, device,args.amp)
+    # model.eval()
+    # eval=Eval_FP()
+    # for batch in val_loader:
+        
+    #     images,true_masks,labels=batch
+    #     assert images.shape[1] == model.n_channels, \
+    #         f'Network has been defined with {model.n_channels} input channels, ' \
+    #         f'but loaded images have {images.shape[1]} channels. Please check that ' \
+    #         'the images are loaded correctly.'
+    #     images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last) # todo float check
+    #     true_masks = true_masks.to(device=device, dtype=torch.long)
+    #     labels=labels.to(device=device,dtype=torch.float32 )
+    #     masks_pred,labels_pred = model(images)
+    #     eval.eval(masks_pred.detach().cpu().numpy(),true_masks.cpu().numpy())
+    # model.train()
+    
+
+        
+    
+    print("fn",eval._fn_per_class,"\nfp",eval._fp_per_class,"\ntp",eval._tp_per_class,"\nn_sample",eval._n_received_samples)
+        
+        
+
+    # train_model(
+    #     model=model,
+    #     epochs=args.epochs,
+    #     batch_size=args.batch_size,
+    #     learning_rate=args.lr,
+    #     device=device,
+    #     img_scale=args.scale,
+    #     amp=args.amp,
+    #     save_checkpoint=args.save_checkpoint,
+    #     dir_checkpoint=args.dir_checkpoint,
+    # )

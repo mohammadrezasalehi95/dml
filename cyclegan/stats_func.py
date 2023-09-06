@@ -43,5 +43,4 @@ def dice_eval(compact_pred, labels, n_class):
         union = torch.sum(pred[:, i, :, :]) + torch.sum(labels[:, i, :, :])
         dice = dice + 2.0 * inse / (union + eps)
         dice_arr.append(2.0 * inse / (union + eps))
-
     return dice_arr

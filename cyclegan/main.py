@@ -1,12 +1,15 @@
 import os
 import json
 import random
+from datasets import MergedDataset
+from utils import os_support_path
 import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from datetime import datetime
 from torchvision.utils import save_image
+import losses
 
 # Assuming the necessary modules are defined in the following files
 # import data_loader, losses, model
@@ -27,14 +30,32 @@ def main(config_filename):
 
     sifa_model = SIFA(config)
     sifa_model.train()
+def collate_fn(batch):
+    images, masks, labels = zip(*batch)
+    images = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in images]
+    images = torch.stack(images)
+    masks = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in masks]
+    masks = torch.stack(masks)
+    
+    if isinstance(labels[0], torch.Tensor):
+        if labels[0].shape == torch.Size([]):  # labels are scalar
+            labels = torch.stack(labels, 0)
+        else:  # labels are sequences
+            labels = pad_sequence(labels, batch_first=True)
+    else:
+        # Convert labels to tensor if they are not
+        labels = torch.tensor(labels)
+    return images, masks, labels
+
+
 
 class SIFA:
     def __init__(self, config):
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._source_train_pth = config['source_train_pth']
-        self._target_train_pth = config['target_train_pth']
-        self._source_val_pth = config['source_val_pth']
-        self._target_val_pth = config['target_val_pth']
+        # self._source_train_pth = config['source_train_pth']
+        # self._target_train_pth = config['target_train_pth']
+        # self._source_val_pth = config['source_val_pth']
+        # self._target_val_pth = config['target_val_pth']
         self._output_root_dir = config['output_root_dir']
         if not os.path.isdir(self._output_root_dir):
             os.makedirs(self._output_root_dir)
@@ -61,34 +82,61 @@ class SIFA:
         # self.discriminator = model.Discriminator().to(device)
 
         # Define the optimizers
-        # self.optimizer_A = optim.Adam(self.model_A.parameters(), lr=self._base_lr)
-        # self.optimizer_B = optim.Adam(self.model_B.parameters(), lr=self._base_lr)
-        # self.optimizer_D = optim.Adam(self.discriminator.parameters(), lr=self._base_lr)
+        self.optimizer_A = optim.Adam(self.model_A.parameters(), lr=self._base_lr)
+        self.optimizer_B = optim.Adam(self.model_B.parameters(), lr=self._base_lr)
+        self.optimizer_D = optim.Adam(self.discriminator.parameters(), lr=self._base_lr)
 
         # Define the loss functions
-        # self.criterion_GAN = losses.GANLoss().to(device)
-        # self.criterion_cycle = losses.CycleConsistencyLoss().to(device)
-        # self.criterion_identity = losses.IdentityLoss().to(device)
-
+        self.criterion_GAN = losses.GANLoss().to(device)
+        self.criterion_cycle = losses.CycleConsistencyLoss().to(device)
+        self.criterion_identity = losses.IdentityLoss().to(device)
+        
         # Load datasets
         # self.dataloader_source_train = DataLoader(data_loader.CustomDataset(self._source_train_pth),
         #                                           batch_size=self._batch_size, shuffle=True)
         # self.dataloader_target_train = DataLoader(data_loader.CustomDataset(self._target_train_pth),
         #                                           batch_size=self._batch_size, shuffle=True)
-    
     def train(self):
         # Training loop
+        train_dataset=MergedDataset( dir_1="Vin/", 
+                                dir_1_sep="Vin/sep/V1/",
+                                size="512/",
+                                dir_2="DDSM/", 
+                                dir_2_sep="DDSM/sep/ORG/",
+                                # transform=target_tr,
+                                # target_transform=target_tr,
+                                phase='train'
+                                # wandb_ex=experiment,
+                                )
+        val_dataset=MergedDataset( dir_1="Vin/", 
+                                dir_1_sep="Vin/sep/V1/",
+                                size="512/",
+                                dir_2="DDSM/", 
+                                dir_2_sep="DDSM/sep/ORG/",
+                                # transform=target_tr,
+                                # target_transform=target_tr,
+                                phase='val'
+                                # wandb_ex=experiment,
+                                )
+            
+        n_train = len(train_dataset)
+        n_val = len(val_dataset) 
+        
+        loader_args = dict(batch_size=self._batch_size, num_workers=1, )
+        train_loader = torch.utils.data.DataLoader(dataset=train_dataset,shuffle=False, **loader_args,collate_fn=collate_fn)
+        val_loader = torch.utils.data.DataLoader(dataset=val_dataset,shuffle=False,drop_last=True, **loader_args ,collate_fn=collate_fn)
+        
+        
         for epoch in range(self._max_step):
-            for i, (real_A, real_B) in enumerate(zip(self.dataloader_source_train, self.dataloader_target_train)):
+            for i, (images, true_masks, true_labels) in enumerate(train_loader):
+                images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last) # todo float check
+                true_masks = true_masks.to(device=device, dtype=torch.long)
+                true_labels=true_labels.to(device=device,dtype=torch.float32 )
                 
                 # Transfer data to the appropriate device
-                real_A = real_A.to(device)
-                real_B = real_B.to(device)
-
                 # Update generator_A and generator_B
                 self.optimizer_A.zero_grad()
                 self.optimizer_B.zero_grad()
-
                 # You should replace the following lines with your actual model training code
                 # loss_A, loss_B = train_generator(self.model_A, self.model_B, real_A, real_B, self.criterion_GAN, self.criterion_cycle, self.criterion_identity)
                 # loss_A.backward()
@@ -124,4 +172,4 @@ class SIFA:
                         self.model_B.train()
 
 if __name__ == '__main__':
-    main(config_filename='./config_param.json')
+    main(config_filename=os_support_path('cyclegan/config_param.json'))

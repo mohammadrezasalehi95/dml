@@ -52,55 +52,54 @@ class DDSMImageDataset(Dataset):
         return image, label
 
 import itertools
-
-
+from utils import os_support_path,read_csv_list
+import csv
 class MergedDataset(Dataset):
-    def __init__(self, img_dir_1, mask_dir_1, img_dir_2, mask_dir_2,transform=None, target_transform=None, phase = "Train"):
-        
-        data_files_1 = list(os.walk(img_dir_1, topdown=False))[0][2][::-1]
-        mask_files_1 = list(os.walk(mask_dir_1, topdown=False))[0][2][::-1]
-        data_files_2 = list(os.walk(img_dir_2, topdown=False))[0][2][::-1]
-        mask_files_2 = list(os.walk(mask_dir_2, topdown=False))[0][2][::-1]
-        endless_iterator_2 = itertools.cycle(data_files_2)
+    def __init__(self, dir_1,dir_1_sep, dir_2,dir_2_sep,size,transform=None, target_transform=None, phase='train' ,wandb_ex=None):
+        files_1=read_csv_list(os_support_path(dir_1_sep+phase+".csv"))
+        files_2=read_csv_list(os_support_path(dir_2_sep+phase+".csv"))
+    
+        dir_1_mask=os_support_path(dir_1+"mask/"+size)
+        dir_1_data=os_support_path(dir_1+"data/"+size)
+        dir_2_mask=os_support_path(dir_2+"mask/"+size)
+        dir_2_data=os_support_path(dir_2+"data/"+size)
+        endless_iterator_2 = itertools.cycle(files_2) # second dataet must have fewer insctances
         data=[]
-        for fn1 in data_files_1:
+        self.wandb_ex=wandb_ex
+        for fn1 in files_1:
             data.append({
-                "mask_dir":mask_dir_1,
-                "img_dir":img_dir_1,
-                "file_name":fn1,
+                "mask_dir":dir_1_mask,
+                "img_dir":dir_1_data,
+                "file_name":fn1[0],
                 "label":1
             })
             fn2=next(endless_iterator_2)
             data.append({
-                "mask_dir":mask_dir_2,
-                "img_dir":img_dir_2,
-                "file_name":fn2,
+                "mask_dir":dir_2_mask,
+                "img_dir":dir_2_data,
+                "file_name":fn2[0],
                 "label":0
             })
-            
-        
-            
         self.transform=transform
         self.target_transform=transform
-        filter_phase=lambda x :not 'Test' in x if phase_train  else   ('Test' in x)
-        
         self.data=data
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         data=self.data[idx]
+        label=data['label']
         # get paths form data[idx] and load mask and image and apply necessary transforms on it
         image = np.load(os.path.join(data['img_dir'], data['file_name']))['arr_0']
-        mask = np.load(os.path.join(data['mask_dir'], data['file_name']))['arr_0']
-        label=data['label']
+        if label:            
+            mask = np.load(os.path.join(data['mask_dir'], data['file_name']))['arr_0']    
+        else:
+            mask = np.load(os.path.join(data['mask_dir'], data['file_name']))['arr_0']*255
         if image.ndim == 2:
             image = image[:, :, None]
-
     # Ensure mask is 3D (H, W, C)
         if mask.ndim == 2:
             mask = mask[:, :, None]
-
         # if self.transform:
         #     image = self.transform(image)
         # if self.target_transform:
