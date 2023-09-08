@@ -150,6 +150,53 @@ class DiscriminatorAux(nn.Module):
         x = self.conv5(x)
         
         return x[..., 0].unsqueeze(1), x[..., 1].unsqueeze(1)
+    
+
+class DRNBlock(nn.Module):
+    def __init__(self, dim, norm_layer=None, dropout_rate=0.25):
+        super(DRNBlock, self).__init__()
+        
+        padding = 2
+        dilation = 2
+
+        self.pad1 = nn.ReflectionPad2d(padding)
+        self.dilated_conv1 = DilatedConv2d(dim, dim, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=nn.ReLU(True), dropout_rate=dropout_rate)
+        
+        self.pad2 = nn.ReflectionPad2d(padding)
+        self.dilated_conv2 = DilatedConv2d(dim, dim, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=None, dropout_rate=dropout_rate)
+
+    def forward(self, input):
+        x = self.pad1(input)
+        x = self.dilated_conv1(x)
+        x = self.pad2(x)
+        x = self.dilated_conv2(x)
+
+        return F.relu(x + input)
+    
+class DRNBlockDS(nn.Module):
+    def __init__(self, dim_in, dim_out, norm_layer=None, dropout_rate=0.25):
+        super(DRNBlockDS, self).__init__()
+        
+        padding = 2
+        dilation = 2
+
+        self.pad1 = nn.ReflectionPad2d(padding)
+        self.dilated_conv1 = DilatedConv2d(dim_in, dim_out, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=nn.ReLU(True), dropout_rate=dropout_rate)
+        
+        self.pad2 = nn.ReflectionPad2d(padding)
+        self.dilated_conv2 = DilatedConv2d(dim_out, dim_out, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=None, dropout_rate=dropout_rate)
+
+        self.pad3 = nn.ReflectionPad2d((dim_out-dim_in)//2)
+
+    def forward(self, input):
+        x = self.pad1(input)
+        x = self.dilated_conv1(x)
+        x = self.pad2(x)
+        x = self.dilated_conv2(x)
+
+        input = self.pad3(input)
+
+        return F.relu(x + input)
 class DiscriminatorAux(nn.Module):
     def __init__(self, ndf, f=4, padw=2):
         super(DiscriminatorAux, self).__init__()
@@ -316,7 +363,66 @@ class Segmenter(nn.Module):
         x = F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)
         
         return x
+    
+class Encoder(nn.Module):
+    def __init__(self, input_dim, name='encoder', is_training=True, keep_rate=0.75):
+        super(Encoder, self).__init__()
+        self.fb = 16
+        self.k1 = 3
+        self.padding = "constant"
+        self.keep_rate = keep_rate
+        self.is_training = is_training
 
+        # Define layers
+        self.c1 = GeneralConv2d(input_dim, self.fb, 7, 1, padding=0, stddev=0.01)
+        self.r1 = ResnetBlock(self.fb, padding_type=self.padding)
+        self.r2 = ResnetBlockDS(self.fb, self.fb*2, padding_type=self.padding)
+        self.r3 = ResnetBlockDS(self.fb*2, self.fb*4, padding_type=self.padding)
+        self.r4 = ResnetBlock(self.fb*4, padding_type=self.padding)
+        self.r5 = ResnetBlockDS(self.fb*4, self.fb*8, padding_type=self.padding)
+        self.r6 = ResnetBlock(self.fb*8, padding_type=self.padding)
+        self.r7 = ResnetBlockDS(self.fb*8, self.fb*16, padding_type=self.padding)
+        self.r8 = ResnetBlock(self.fb*16, padding_type=self.padding)
+        self.r9 = ResnetBlock(self.fb*16, padding_type=self.padding)
+        self.r10 = ResnetBlock(self.fb*16, padding_type=self.padding)
+        self.r11 = ResnetBlockDS(self.fb*16, self.fb*32, padding_type=self.padding)
+        self.r12 = ResnetBlock(self.fb*32, padding_type=self.padding)
+        self.d1 = DRNBlock(self.fb*32)
+        self.d2 = DRNBlock(self.fb*32)
+        self.c2 = GeneralConv2d(self.fb*32, self.fb*32, self.k1, 1, stddev=0.01)
+        self.c3 = GeneralConv2d(self.fb*32, self.fb*32, self.k1, 1, stddev=0.01)
+
+    def forward(self, x):
+        o_c1 = self.c1(x)
+        o_r1 = self.r1(o_c1)
+        out1 = F.max_pool2d(o_r1, 2, stride=2)
+
+        o_r2 = self.r2(out1)
+        out2 = F.max_pool2d(o_r2, 2, stride=2)
+
+        o_r3 = self.r3(out2)
+        o_r4 = self.r4(o_r3)
+        out3 = F.max_pool2d(o_r4, 2, stride=2)
+
+        o_r5 = self.r5(out3)
+        o_r6 = self.r6(o_r5)
+
+        o_r7 = self.r7(o_r6)
+        o_r8 = self.r8(o_r7)
+
+        o_r9 = self.r9(o_r8)
+        o_r10 = self.r10(o_r9)
+
+        o_r11 = self.r11(o_r10)
+        o_r12 = self.r12(o_r11)
+
+        o_d1 = self.d1(o_r12)
+        o_d2 = self.d2(o_d1)
+
+        o_c2 = self.c2(o_d2)
+        o_c3 = self.c3(o_c2)
+
+        return o_c3, o_r12
 class SIFA(nn.Module):
     def __init__(self, n_channels, n_classes,skip
                  , bilinear=False):
