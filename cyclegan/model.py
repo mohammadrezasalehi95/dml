@@ -240,47 +240,55 @@ class GeneratorResnet9blocks(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False):
+    def __init__(self, n_channels, n_classes,skip
+                 , bilinear=False):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
-        self.discriminator_aux=DiscriminatorAux()
-        self.current_discriminator=Discriminator()
-        self.build_generator_resnet_9blocks=
+        self.discriminator_aux_A = DiscriminatorAux()
+        self.discriminator_aux_B = DiscriminatorAux()
+        self.discriminator_A = Discriminator()
+        self.discriminator_B = Discriminator()
+        self.discriminator_P = Discriminator()
+        self.discriminator_P_ll = Discriminator()
+        self.generator_A = Generator(n_blocks=9)
+        self.encoder_B = Encoder()
+        self.decoder_B = Decoder()
+        self.segmenter_B = Segmenter()
+        self.segmenter_B_ll = Segmenter()
+        self.drop_out_rate=0.25
         self.fc=nn.Linear(512, 1)
         self.sigmoid = nn.Sigmoid()
         
 
-    def forward(self, inputs):
+    def forward(self, inputs,skip=False):
         images_a = inputs['images_a']
         images_b = inputs['images_b']
         fake_pool_a = inputs['fake_pool_a']
         fake_pool_b = inputs['fake_pool_b']
-        prob_real_a_is_real, prob_real_a_aux = self.discriminator_aux(images_a, "d_A")
-        prob_real_a_is_real, prob_real_a_aux = self.discriminator_aux(images_a, "d_A")
-        prob_real_b_is_real = self.current_discriminator(images_b, "d_B")
-
-        fake_images_b = self.build_generator_resnet_9blocks(images_a, images_a, name='g_A', skip=skip)
         
-        latent_b, latent_b_ll = current_encoder(images_b, name='e_B', skip=skip, is_training=is_training, keep_rate=keep_rate)
+        prob_real_a_is_real, prob_real_a_aux = self.discriminator_aux_A(images_a)
+        prob_real_b_is_real = self.discriminator_B(images_b)
 
-        fake_images_a = current_decoder(latent_b, images_b, name='de_B', skip=skip)
+        fake_images_b = self.generator_A(images_a, images_a, skip=skip)
+        latent_b, latent_b_ll = self.encoder_B(images_b, skip=skip, drop_out_rate=self.drop_out_rate)
+        fake_images_a = self.decoder_B(latent_b, images_b, skip=skip)
+        pred_mask_b = self.segmenter_B(latent_b)
+        pred_mask_b_ll = self.segmenter_B_ll(latent_b_ll)
+        prob_fake_a_is_real, prob_fake_a_aux_is_real = self.discriminator_aux_A(fake_images_a)
+        prob_fake_b_is_real = self.discriminator_B(fake_images_b)
 
-        # pred_mask_b = current_segmenter(latent_b, name='s_B', keep_rate=keep_rate)
-        # pred_mask_b_ll = current_segmenter(latent_b_ll, name='s_B_ll', keep_rate=keep_rate)
+        latent_fake_b, latent_fake_b_ll = self.encoder_B(fake_images_b, skip=skip, drop_out_rate=self.drop_out_rate)
+        cycle_images_b = self.generator_A(fake_images_a, fake_images_a, skip=skip)
 
+        cycle_images_a = self.decoder_B(latent_fake_b, fake_images_b, skip=skip)
 
-        # prob_fake_a_is_real, prob_fake_a_aux_is_real = discriminator_aux(fake_images_a, "d_A")
-        # prob_fake_b_is_real = current_discriminator(fake_images_b, "d_B")
+        pred_mask_fake_b = self.segmenter_B(latent_fake_b,drop_out_rate=self.drop_out_rate)
+        pred_mask_fake_b_ll = self.segmenter_B_ll(latent_fake_b_ll,drop_out_rate=self.drop_out_rate)
 
-        # latent_fake_b, latent_fake_b_ll = current_encoder(fake_images_b, 'e_B', skip=skip, is_training=is_training, keep_rate=keep_rate)
-        # cycle_images_b = build_generator_resnet_9blocks(fake_images_a, fake_images_a, 'g_A', skip=skip)
-
-        # cycle_images_a = current_decoder(latent_fake_b, fake_images_b, 'de_B', skip=skip)
-
-        # pred_mask_fake_b = current_segmenter(latent_fake_b, 's_B', keep_rate=keep_rate)
-        # pred_mask_fake_b_ll = current_segmenter(latent_fake_b_ll, 's_B_ll', keep_rate=keep_rate)
+        prob_fake_pool_a_is_real, prob_fake_pool_a_aux_is_real = self.discriminator_aux_A(fake_pool_a)
+        prob_fake_pool_b_is_real = self.discriminator_B(fake_pool_b)
 
         # prob_fake_pool_a_is_real, prob_fake_pool_a_aux_is_real = discriminator_aux(fake_pool_a, "d_A")
         # prob_fake_pool_b_is_real = current_discriminator(fake_pool_b, "d_B")
