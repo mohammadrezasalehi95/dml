@@ -254,10 +254,8 @@ def train_model(
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
                 pbar.update(images.shape[0])
-
                 global_step += 1
-                epoch_loss += loss.item()
-
+                epoch_loss += loss.item()                                                                                                
                 experiment.log({
                     'train loss_dir': loss1.item(),
                     'train loss_adv_source': loss2.item(),
@@ -297,8 +295,6 @@ def train_model(
                             })
                         except:
                             pass
- 
- 
         if save_checkpoint:
             Path(os_support_path(dir_checkpoint)).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()

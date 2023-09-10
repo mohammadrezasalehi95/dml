@@ -57,7 +57,10 @@ class ResnetBlock(nn.Module):
 
 class ResnetBlockIns(ResnetBlock):
     def build_conv_block(self, dim, padding_type, norm_type, use_dropout, dropout_rate):
-        conv_block = super().build_conv_block(dim, padding_type, norm_type='Ins', use_dropout, dropout_rate)
+        conv_block = super().build_conv_block(dim, padding_type, norm_type='Ins', 
+                                            #   use_dropout, 
+                                            #   dropout_rate
+                                              )
         return conv_block
 
 
@@ -423,10 +426,10 @@ class Encoder(nn.Module):
         o_c3 = self.c3(o_c2)
 
         return o_c3, o_r12
-class SIFA(nn.Module):
+class SIFAModule(nn.Module):
     def __init__(self, n_channels, n_classes,skip
                  , bilinear=False):
-        super(SIFA, self).__init__()
+        super(SIFAModule, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
