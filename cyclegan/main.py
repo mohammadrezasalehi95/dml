@@ -1,3 +1,4 @@
+from cyclegan.datasets import CoupledDataset
 import torch.nn.functional as F
 import os
 import json
@@ -24,21 +25,19 @@ from tqdm import tqdm
 
 
 def collate_fn(batch):
-    images, masks, labels = zip(*batch)
-    images = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in images]
-    images = torch.stack(images)
-    masks = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in masks]
-    masks = torch.stack(masks)
+    inpput_src, input_tr, gt_src,gt_tr = zip(*batch)
+    inpput_src = [torch.from_numpy(np.squeeze(arr)) for arr in inpput_src]
+    inpput_src = torch.stack(inpput_src)
+    
+    input_tr = [torch.from_numpy(np.squeeze(arr)) for arr in input_tr]
+    input_tr = torch.stack(input_tr)
 
-    if isinstance(labels[0], torch.Tensor):
-        if labels[0].shape == torch.Size([]):  # labels are scalar
-            labels = torch.stack(labels, 0)
-        else:  # labels are sequences
-            labels = pad_sequence(labels, batch_first=True)
-    else:
-        # Convert labels to tensor if they are not
-        labels = torch.tensor(labels)
-    return images, masks, labels
+    gt_src = [torch.from_numpy(np.squeeze(arr)) for arr in gt_src]
+    gt_src = torch.stack(gt_src)
+
+    gt_tr = [torch.from_numpy(np.squeeze(arr)) for arr in gt_tr]
+    gt_tr = torch.stack(gt_tr)
+    return inpput_src, input_tr, gt_src,gt_tr
 
 
 class SIFA:
@@ -187,9 +186,9 @@ class SIFA:
 
         return g_loss_A, g_loss_B, seg_loss_B, d_loss_A, d_loss_B, d_loss_P, d_loss_P_ll
 
-    def train(self, epochs):
+    def train(self, model,epochs):
         # Training loop
-        train_dataset = MergedDataset(dir_1="Vin/",
+        train_dataset = CoupledDataset(dir_1="Vin/",
                                       dir_1_sep="Vin/sep/V1/",
                                       size="512/",
                                       dir_2="DDSM/",
@@ -199,7 +198,7 @@ class SIFA:
                                       phase='train'
                                       # wandb_ex=experiment,
                                       )
-        val_dataset = MergedDataset(dir_1="Vin/",
+        val_dataset = CoupledDataset(dir_1="Vin/",
                                     dir_1_sep="Vin/sep/V1/",
                                     size="512/",
                                     dir_2="DDSM/",
@@ -209,6 +208,17 @@ class SIFA:
                                     phase='val'
                                     # wandb_ex=experiment,
                                     )
+        val_showing_dataset=CoupledDataset(dir_1="Vin/",
+                                    dir_1_sep="Vin/sep/V1/",
+                                    size="512/",
+                                    dir_2="DDSM/",
+                                    dir_2_sep="DDSM/sep/ORG/",
+                                    # transform=target_tr,
+                                    # target_transform=target_tr,
+                                    phase='val'
+                                    # wandb_ex=experiment,
+                                    )
+        
 
         n_train = len(train_dataset)
         n_val = len(val_dataset)
@@ -218,9 +228,10 @@ class SIFA:
             dataset=train_dataset, shuffle=False, **loader_args, collate_fn=collate_fn)
         val_loader = torch.utils.data.DataLoader(
             dataset=val_dataset, shuffle=False, drop_last=True, **loader_args, collate_fn=collate_fn)
+        val_showing_loader = torch.utils.data.DataLoader(
+            dataset=val_showing_dataset, shuffle=False, drop_last=True, **loader_args, collate_fn=collate_fn)
 
         model = SIFAModule().to(self.device)
-
 
         discriminator_A_optimizer = torch.optim.Adam(self.discriminator_A_vars, lr=self.learning_rate_gan, betas=(0.5, 0.999))
         discriminator_B_optimizer = torch.optim.Adam(self.discriminator_B_vars, lr=self.learning_rate_gan, betas=(0.5, 0.999))
@@ -239,6 +250,8 @@ class SIFA:
             epoch_loss = 0
             with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
                 for batch in train_loader:
+                    input_a,input_b,gt_a,gt_b=batch
+                    
                     images = images.to(device=self.device, dtype=torch.float32,
                                        memory_format=torch.channels_last)  # todo float check
                     true_masks = true_masks.to(
@@ -284,13 +297,11 @@ class SIFA:
                     dice_fake_b_arr = dice_eval(
                         compact_pred_fake_b, gt_a, self._num_cls)
                     dice_fake_b_mean = torch.mean(self.dice_fake_b_arr)
-                    # For tensorboardX equivalent of tf.summary.scalar
 
                     dice_b_arr = dice_eval(
                         compact_pred_b, gt_b, self._num_cls)
                     dice_b_mean = torch.mean(dice_b_arr)
 
-                    # For tensorboardX equivalent of tf.summary.scalar
                     g_loss_A, g_loss_B, seg_loss_B, d_loss_A, d_loss_B, d_loss_P, d_loss_P_ll = self.compute_losses(
                         input_a,
                         input_b,

@@ -163,10 +163,10 @@ class DRNBlock(nn.Module):
         dilation = 2
 
         self.pad1 = nn.ReflectionPad2d(padding)
-        self.dilated_conv1 = DilatedConv2d(dim, dim, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=nn.ReLU(True), dropout_rate=dropout_rate)
+        self.dilated_conv1 = DilateConv2d(dim, dim, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=nn.ReLU(True), dropout_rate=dropout_rate)
         
         self.pad2 = nn.ReflectionPad2d(padding)
-        self.dilated_conv2 = DilatedConv2d(dim, dim, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=None, dropout_rate=dropout_rate)
+        self.dilated_conv2 = DilateConv2d(dim, dim, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=None, dropout_rate=dropout_rate)
 
     def forward(self, input):
         x = self.pad1(input)
@@ -184,10 +184,10 @@ class DRNBlockDS(nn.Module):
         dilation = 2
 
         self.pad1 = nn.ReflectionPad2d(padding)
-        self.dilated_conv1 = DilatedConv2d(dim_in, dim_out, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=nn.ReLU(True), dropout_rate=dropout_rate)
+        self.dilated_conv1 = DilateConv2d(dim_in, dim_out, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=nn.ReLU(True), dropout_rate=dropout_rate)
         
         self.pad2 = nn.ReflectionPad2d(padding)
-        self.dilated_conv2 = DilatedConv2d(dim_out, dim_out, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=None, dropout_rate=dropout_rate)
+        self.dilated_conv2 = DilateConv2d(dim_out, dim_out, kernel_size=3, stride=1, dilation=dilation, bias=False, norm_layer=norm_layer, activation=None, dropout_rate=dropout_rate)
 
         self.pad3 = nn.ReflectionPad2d((dim_out-dim_in)//2)
 
