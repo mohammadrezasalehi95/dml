@@ -1,4 +1,4 @@
-from cyclegan.layers import *
+from layers import *
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

@@ -31,7 +31,7 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     return 1 - fn(input, target, reduce_batch_first=True)
 
 @torch.inference_mode()
-def evaluate(net, dataloader, device, amp):
+def evaluate(net, dataloader,val_showing_loader, device, amp):
     net.eval()
     num_val_batches = len(dataloader)
     dice_score = 0
@@ -39,7 +39,7 @@ def evaluate(net, dataloader, device, amp):
     # iterate over the validation set
     with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
         for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch', position=0,leave=False):
-            image, mask_true = batch
+            image,gb_i, mask_true ,gb_m= batch
 
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)

@@ -385,10 +385,8 @@ if __name__ == '__main__':
     #     masks_pred,labels_pred = model(images)
     #     eval.eval(masks_pred.detach().cpu().numpy(),true_masks.cpu().numpy())
     # model.train()
-    
 
-        
-    
+
     print("fn",eval._fn_per_class,"\nfp",eval._fp_per_class,"\ntp",eval._tp_per_class,"\nn_sample",eval._n_received_samples)
         
         

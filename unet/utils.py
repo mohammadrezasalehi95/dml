@@ -3,8 +3,47 @@ import torch.nn as nn
 import torch
 from torch import Tensor
 from typing import Optional
+from skimage import measure
+import csv
+import os
+import glob
 
+# specify your path here
+
+import re
 from torch.nn import functional as F
+OS = 'windows'
+
+def get_epoch_from_filename(filename):
+    match = re.search(r'.*checkpoint_epoch(\d+).pth', filename)
+    if match:
+        return int(match.group(1))
+    else:
+        return None
+
+def create_directory_if_not_exists(directory_path):
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+
+def load_recentliest_file(g_path):
+    path=os_support_path(g_path)
+    create_directory_if_not_exists(path)
+    files = glob.glob(path+"*.pth")
+    if files:
+        return max(files, key=os.path.getctime)
+    else:
+        return None
+    
+    
+def os_support_path(path):
+    if OS=="windows":
+        return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
+def read_csv_list(file_path):
+    with open(file_path, 'r') as f:
+        reader = csv.reader(f)
+        data = list(reader)
+        
+    return data[1:]
 
 def balanced_focal_cross_entropy_loss(
         probs:torch.Tensor, gt: torch.Tensor, focal_gamma: float = 1,

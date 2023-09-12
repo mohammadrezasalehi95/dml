@@ -1,10 +1,10 @@
-from cyclegan.datasets import CoupledDataset
+from datasets import CoupledDataset
 import torch.nn.functional as F
 import os
 import json
 import random
-from cyclegan.model import SIFAModule
-from cyclegan.stats_func import dice_eval
+from model import SIFAModule
+from stats_func import dice_eval
 from datasets import MergedDataset
 from utils import os_support_path
 import numpy as np
@@ -215,11 +215,20 @@ class SIFA:
                                     dir_2_sep="DDSM/sep/ORG/",
                                     # transform=target_tr,
                                     # target_transform=target_tr,
-                                    phase='val'
+                                    phase='val2'
+                                    # wandb_ex=experiment,
+                                    )
+        test_dataset=CoupledDataset(dir_1="Vin/",
+                                    dir_1_sep="Vin/sep/V1/",
+                                    size="512/",
+                                    dir_2="DDSM/",
+                                    dir_2_sep="DDSM/sep/ORG/",
+                                    # transform=target_tr,
+                                    # target_transform=target_tr,
+                                    phase='test'
                                     # wandb_ex=experiment,
                                     )
         
-
         n_train = len(train_dataset)
         n_val = len(val_dataset)
 
@@ -251,6 +260,7 @@ class SIFA:
             with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
                 for batch in train_loader:
                     input_a,input_b,gt_a,gt_b=batch
+                    
                     
                     images = images.to(device=self.device, dtype=torch.float32,
                                        memory_format=torch.channels_last)  # todo float check
