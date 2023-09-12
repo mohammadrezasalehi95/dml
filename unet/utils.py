@@ -38,6 +38,8 @@ def load_recentliest_file(g_path):
 def os_support_path(path):
     if platform.system() == 'Windows':
         return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
+    else:
+        return path
 def read_csv_list(file_path):
     with open(file_path, 'r') as f:
         reader = csv.reader(f)
