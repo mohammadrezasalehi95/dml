@@ -6,17 +6,17 @@ from typing import Optional
 import numpy as np
 from typing import List
 from torch.nn import functional as F
-OS='windows'
+import platform
 from skimage import measure
 import csv
 def os_support_path(path):
-    if OS=="windows":
+    if platform.system() == 'Windows':
         return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
 def read_csv_list(file_path):
     with open(file_path, 'r') as f:
         reader = csv.reader(f)
         data = list(reader)
-        
+
     return data[1:]
 
 

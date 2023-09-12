@@ -1,3 +1,4 @@
+import platform
 import torch
 import torch.nn as nn
 import torch
@@ -12,7 +13,6 @@ import glob
 
 import re
 from torch.nn import functional as F
-OS = 'windows'
 
 def get_epoch_from_filename(filename):
     match = re.search(r'.*checkpoint_epoch(\d+).pth', filename)
@@ -36,7 +36,7 @@ def load_recentliest_file(g_path):
     
     
 def os_support_path(path):
-    if OS=="windows":
+    if platform.system() == 'Windows':
         return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
 def read_csv_list(file_path):
     with open(file_path, 'r') as f:

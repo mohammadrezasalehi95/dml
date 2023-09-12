@@ -5,3 +5,4 @@ Model/
 wandb/
 cyclegan/
 .vscode/
+*.zip
