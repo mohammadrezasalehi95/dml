@@ -1,22 +1,50 @@
+import platform
 import torch
 import torch.nn as nn
 import torch
 from torch import Tensor
 from typing import Optional
-import numpy as np
-from typing import List
-from torch.nn import functional as F
-import platform
 from skimage import measure
 import csv
+import os
+import glob
+import numpy as np
+# specify your path here
+
+import re
+from torch.nn import functional as F
+
+def get_epoch_from_filename(filename):
+    match = re.search(r'.*checkpoint_epoch(\d+).pth', filename)
+    if match:
+        return int(match.group(1))
+    else:
+        return None
+
+def create_directory_if_not_exists(directory_path):
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+
+def load_recentliest_file(g_path):
+    path=os_support_path(g_path)
+    create_directory_if_not_exists(path)
+    files = glob.glob(path+"*.pth")
+    if files:
+        return max(files, key=os.path.getctime)
+    else:
+        return None
+    
+    
 def os_support_path(path):
     if platform.system() == 'Windows':
         return  "C:\\Users\\user01\\dml\\"+path.replace("/","\\")
+    else:
+        return path
 def read_csv_list(file_path):
     with open(file_path, 'r') as f:
         reader = csv.reader(f)
         data = list(reader)
-
+        
     return data[1:]
 
 

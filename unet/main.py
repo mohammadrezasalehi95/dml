@@ -465,7 +465,7 @@ if __name__ == '__main__':
     args.amp = False
     args.classes = 1
     args.scale = 1
-    args.batch_size = 10
+    args.batch_size = 4
     args.bilinear = False
     args.epochs = 10
     args.dir_checkpoint = "Model/unet/"

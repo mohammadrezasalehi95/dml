@@ -37,36 +37,20 @@ def evaluate(net, dataloader, device, amp):
     dice_score = 0
     my_eval=Eval_FP()
 
-    experiment = wandb.init(project='Breast-vgg',
-                            # mode="disabled",
-                            
-                            # name="vgg_unet-with merged dataset"
-                            )
-    
-
     # iterate over the validation set
     with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
         
         for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch', position=0,leave=False):
-            image, mask_true,labels = batch
+            image,gb_i, mask_true ,gb_m= batch
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
             mask_true = mask_true.to(device=device, dtype=torch.long)
-            labels=labels.to(device=device,dtype=torch.float32 )
+            # labels=labels.to(device=device,dtype=torch.float32 )
             # predict the mask
             mask_pred,labels_pred = net(image)
-            pp=F.sigmoid(mask_pred).detach().cpu().numpy()
+            pp=(mask_pred).detach().cpu().numpy()
             gt=mask_true.cpu().float().numpy()
-            experiment.log({
-                                                'masks': {
-                                    'gt': wandb.Image(gt[0]),
-                                    'pred05': wandb.Image(((pp[0])>=0.5)),
-                                    'pred07': wandb.Image(((pp[0])>=0.7)),
-                                },
-
-            }
-                
-            )
+   
             print(np.max(pp),np.max(gt),"||",np.min(pp),np.min(gt))
             my_eval.eval(pp,gt)
             if net.n_classes == 1:

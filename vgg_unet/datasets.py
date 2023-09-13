@@ -106,4 +106,74 @@ class MergedDataset(Dataset):
         #     label = self.target_transform(label)
         return image, mask , label
 
-    
+class CoupledDataset(Dataset):
+    def __init__(self, dir_1, dir_1_sep, dir_2, dir_2_sep, size, transform=None, target_transform=None, phase='train', wandb_ex=None,fix_to_first=True):
+        files_1 = read_csv_list(os_support_path(dir_1_sep+phase+".csv"))
+        files_2 = read_csv_list(os_support_path(dir_2_sep+phase+".csv"))
+        dir_1_mask = os_support_path(dir_1+"mask/"+size)
+        dir_1_data = os_support_path(dir_1+"data/"+size)
+        dir_2_mask = os_support_path(dir_2+"mask/"+size)
+        dir_2_data = os_support_path(dir_2+"data/"+size)
+        # second dataet must have fewer instances
+        endless_iterator_2 = itertools.cycle(files_2)
+        endless_iterator_1 = itertools.cycle(files_1)
+        data = []
+        self.wandb_ex = wandb_ex
+        if fix_to_first:
+            for fn1 in files_1:
+                fn2 = next(endless_iterator_2)
+                data.append(
+                    {"target": {
+                        "mask_dir": dir_1_mask,
+                        "img_dir": dir_1_data,
+                        "file_name": fn1[0],
+                        "label": 1
+                    },
+                        "source": {
+                        "mask_dir": dir_2_mask,
+                        "img_dir": dir_2_data,
+                        "file_name": fn2[0],
+                        "label": 0
+                    }})
+        else:
+            for fn2 in files_2:
+                fn1 = next(endless_iterator_1)
+                data.append(
+                    {"target": {
+                        "mask_dir": dir_1_mask,
+                        "img_dir": dir_1_data,
+                        "file_name": fn1[0],
+                        "label": 1
+                    },
+                        "source": {
+                        "mask_dir": dir_2_mask,
+                        "img_dir": dir_2_data,
+                        "file_name": fn2[0],
+                        "label": 0
+                    }})            
+        self.transform = transform
+        self.target_transform = transform
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        data_source=self.data[idx]['source']
+        data_target=self.data[idx]['target']
+        
+        image_src = np.load(os.path.join(
+            data_source['img_dir'], data_source['file_name']))['arr_0']
+        gt_src=np.load(os.path.join(data_source['mask_dir'], data_source['file_name']))[
+                'arr_0']*255
+        
+        image_target = np.load(os.path.join(
+            data_target['img_dir'], data_target['file_name']))['arr_0']
+        gt_target=np.load(os.path.join(
+                data_target['mask_dir'], data_target['file_name']))['arr_0']
+
+        # if self.transform:
+        #     image = self.transform(image)
+        # if self.target_transform:
+        #     label = self.target_transform(label)
+        return image_src, image_target, gt_src,gt_target    
