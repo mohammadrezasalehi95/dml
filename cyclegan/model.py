@@ -434,8 +434,6 @@ class SIFAModule(nn.Module):
         self.n_classes = n_classes
         self.bilinear = bilinear
         self.discriminator_aux_A = DiscriminatorAux()
-        self.discriminator_aux_B = DiscriminatorAux()
-        self.discriminator_A = Discriminator()
         self.discriminator_B = Discriminator()
         self.discriminator_P = Discriminator()
         self.discriminator_P_ll = Discriminator()
@@ -447,17 +445,14 @@ class SIFAModule(nn.Module):
         self.drop_out_rate=0.25
         self.fc=nn.Linear(512, 1)
         self.sigmoid = nn.Sigmoid()
-        
 
     def forward(self, inputs,skip=False):
         images_a = inputs['images_a']
         images_b = inputs['images_b']
         fake_pool_a = inputs['fake_pool_a']
         fake_pool_b = inputs['fake_pool_b']
-        
         prob_real_a_is_real, prob_real_a_aux = self.discriminator_aux_A(images_a)
         prob_real_b_is_real = self.discriminator_B(images_b)
-
         fake_images_b = self.generator_A(images_a, images_a, skip=skip)
         latent_b, latent_b_ll = self.encoder_B(images_b, skip=skip, drop_out_rate=self.drop_out_rate)
         fake_images_a = self.decoder_B(latent_b, images_b, skip=skip)
@@ -465,27 +460,18 @@ class SIFAModule(nn.Module):
         pred_mask_b_ll = self.segmenter_B_ll(latent_b_ll)
         prob_fake_a_is_real, prob_fake_a_aux_is_real = self.discriminator_aux_A(fake_images_a)
         prob_fake_b_is_real = self.discriminator_B(fake_images_b)
-
         latent_fake_b, latent_fake_b_ll = self.encoder_B(fake_images_b, skip=skip, drop_out_rate=self.drop_out_rate)
         cycle_images_b = self.generator_A(fake_images_a, fake_images_a, skip=skip)
-
         cycle_images_a = self.decoder_B(latent_fake_b, fake_images_b, skip=skip)
-
         pred_mask_fake_b = self.segmenter_B(latent_fake_b,drop_out_rate=self.drop_out_rate)
         pred_mask_fake_b_ll = self.segmenter_B_ll(latent_fake_b_ll,drop_out_rate=self.drop_out_rate)
-
         prob_fake_pool_a_is_real, prob_fake_pool_a_aux_is_real = self.discriminator_aux_A(fake_pool_a)
         prob_fake_pool_b_is_real = self.discriminator_B(fake_pool_b)
-        
         prob_cycle_a_is_real, prob_cycle_a_aux_is_real = self.discriminator_aux_A(cycle_images_a)
-
         prob_pred_mask_fake_b_is_real = self.discriminator_P(pred_mask_fake_b)
         prob_pred_mask_b_is_real = self.discriminator_P(pred_mask_b)
-
         prob_pred_mask_fake_b_ll_is_real = self.discriminator_P_ll(pred_mask_fake_b_ll)
         prob_pred_mask_b_ll_is_real = self.discriminator_P_ll(pred_mask_b_ll)
-
-
         return {
         'prob_real_a_is_real': prob_real_a_is_real,
         'prob_real_b_is_real': prob_real_b_is_real,

@@ -144,7 +144,7 @@ class Eval_FP():
     def __init__(self):
         self._threshold=.5
         self._n_received_samples=0
-        self._c=2
+        self._c=1
         self._tp_per_class: List[float] = np.zeros((self._c,), dtype=int)
         self._fp_per_class: List[float] = np.zeros_like(self._tp_per_class)
         self._fn_per_class: List[float] = np.zeros_like(self._tp_per_class)

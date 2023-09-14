@@ -183,7 +183,6 @@ class SIFA:
             prob_real_is_real=prob_pred_mask_fake_b_ll_is_real,
             prob_fake_is_real=prob_pred_mask_b_ll_is_real,
         )
-
         return g_loss_A, g_loss_B, seg_loss_B, d_loss_A, d_loss_B, d_loss_P, d_loss_P_ll
 
     def train(self, model,epochs):
@@ -303,15 +302,12 @@ class SIFA:
                     predicter_b = torch.softmax(pred_mask_b, dim=3)
                     compact_pred_b = torch.argmax(predicter_b, dim=3)
                     compact_y_b = torch.argmax(gt_b, dim=3)
-
                     dice_fake_b_arr = dice_eval(
                         compact_pred_fake_b, gt_a, self._num_cls)
                     dice_fake_b_mean = torch.mean(self.dice_fake_b_arr)
-
                     dice_b_arr = dice_eval(
                         compact_pred_b, gt_b, self._num_cls)
                     dice_b_mean = torch.mean(dice_b_arr)
-
                     g_loss_A, g_loss_B, seg_loss_B, d_loss_A, d_loss_B, d_loss_P, d_loss_P_ll = self.compute_losses(
                         input_a,
                         input_b,
@@ -343,7 +339,6 @@ class SIFA:
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
-
                     step_optimizer(discriminator_A_optimizer, d_loss_A)
                     step_optimizer(discriminator_B_optimizer, d_loss_B)
                     step_optimizer(generator_A_optimizer, g_loss_A)

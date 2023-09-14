@@ -355,24 +355,18 @@ def train_model(
                 images = images.to(
                     device=device, dtype=torch.float32, memory_format=torch.channels_last)
                 true_masks = true_masks.to(device=device, dtype=torch.long)
-
+                
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred = model(images)
                     if model.n_classes == 1:
                         loss = balanced_focal_cross_entropy_loss(
                             masks_pred, true_masks, focal_gamma=2).mean()
                     else:
-                        loss = criterion(masks_pred, true_masks)
-                        loss += dice_loss(
-                            F.softmax(masks_pred, dim=1).float(),
-                            F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(), multiclass=True)
+                        return 
 
-                optimizer.zero_grad(set_to_none=True)
-                grad_scaler.scale(loss).backward()
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), gradient_clipping)
-                grad_scaler.step(optimizer)
-                grad_scaler.update()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
                 pbar.update(images.shape[0])
                 global_step += 1
@@ -495,7 +489,7 @@ if __name__ == '__main__':
             current_epoch = get_epoch_from_filename(file)+1
             state_dict = torch.load(file, map_location=device)
             model.load_state_dict(state_dict)
-            logging.info(f'Model loaded from {args.load}')
+            logging.info(f'Model loaded from {file}')
         else:
             current_epoch = 1
 

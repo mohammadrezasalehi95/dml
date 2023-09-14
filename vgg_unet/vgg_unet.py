@@ -47,7 +47,7 @@ class UNet(nn.Module):
         self.n_classes = n_classes
         self.bilinear = bilinear
 
-        self.inc = (DoubleConv(n_channels, 64))
+        self.inc = DoubleConv(n_channels, 64)
         self.down1 = (Down(64, 128))
         self.down2 = (Down(128, 256))
         self.down3 = (Down(256, 512))
@@ -121,7 +121,6 @@ def collate_fn_merge(batch):
     images = torch.stack(images)
     masks = [torch.from_numpy(np.squeeze(arr)).unsqueeze(0) for arr in masks]
     masks = torch.stack(masks)
-
     if isinstance(labels[0], torch.Tensor):
         if labels[0].shape == torch.Size([]):  # labels are scalar
             labels = torch.stack(labels, 0)
@@ -153,15 +152,11 @@ def train_model(
                             # name="vgg_unet-with merged dataset"
                             )
 
-    data_transforms = transforms.Compose([transforms.ToTensor()])
-    target_tr = transforms.Compose([transforms.ToTensor()])
     train_dataset = MergedDataset(dir_1="Vin/",
                                   dir_1_sep="Vin/sep/V1/",
                                   size="512/",
                                   dir_2="DDSM/",
                                   dir_2_sep="DDSM/sep/ORG/",
-                                  transform=target_tr,
-                                  target_transform=target_tr,
                                   phase='train'
                                   # wandb_ex=experiment,
                                   )
@@ -199,7 +194,6 @@ def train_model(
                                              shuffle=False, drop_last=True, **loader_args, collate_fn=collate_fn_couple)
     val_showing_loader = torch.utils.data.DataLoader(
         dataset=val_showing_dataset, shuffle=False, **loader_args, num_workers=1, collate_fn=collate_fn_couple)
-
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
              #  img_scale=img_scale,
@@ -227,19 +221,42 @@ def train_model(
     ''')
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    optimizer = optim.RMSprop(model.parameters(),
-                              lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
+    optimizer_vgg = optim.Adam(itertools.chain(
+        model.discre_start.parameters(),
+        model.CRCR1.parameters(),
+        model.CRCR2.parameters(),
+        model.CRCR3.parameters(),
+        model.CRCR4.parameters(),
+        model.fc.parameters(),
+        ),
+                              lr=learning_rate, foreach=True)
+    optimizer_enc = optim.Adam(itertools.chain(
+        model.inc.parameters(),
+        model.down1.parameters(),
+        model.down2.parameters(),
+        model.down3.parameters(),
+        model.down4.parameters(),
+        ),
+                              lr=learning_rate, foreach=True)
+    optimizer_dec = optim.Adam(itertools.chain(
+        model.up1.parameters(),
+        model.up2.parameters(),
+        model.up3.parameters(),
+        model.up4.parameters(),
+        model.outc.parameters(),
+        ),lr=learning_rate, foreach=True)
+    
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion2 = nn.BCELoss()
+    criterion2 = lambda a ,b: torch.mean(((a-b)**2))
     global_step = 0
     # 5. Begin training
-    for epoch in range(1, epochs + 1):
+    for epoch in range(current_epoch, current_epoch+epochs + 1):
         model.train()
         epoch_loss = 0
-        with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
+        with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs+current_epoch}', unit='img') as pbar:
             for batch in train_loader:
-                images, true_masks, labels = batch
+                images, true_masks,labels  = batch
                 assert images.shape[1] == model.n_channels, \
                     f'Network has been defined with {model.n_channels} input channels, ' \
                     f'but loaded images have {images.shape[1]} channels. Please check that ' \
@@ -247,7 +264,6 @@ def train_model(
                 images = images.to(device=device, dtype=torch.float32,
                                    memory_format=torch.channels_last)  # todo float check
                 true_masks = true_masks.to(device=device, dtype=torch.long)
-
                 labels = labels.to(device=device, dtype=torch.float32)
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred, labels_pred = model(images)
@@ -256,37 +272,45 @@ def train_model(
                     B, H, W = labels.shape[0], 512, 512
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
                     ignore_mask = labels.view(B, 1, 1, 1).expand(-1, 1, H, W)
-
-                    loss1 = balanced_focal_cross_entropy_loss(probs=masks_pred,
+                    loss_seg = balanced_focal_cross_entropy_loss(probs=masks_pred,
                                                               gt=true_masks,
                                                               ignore_mask=ignore_mask,
                                                               focal_gamma=2
                                                               ).mean()
+                    loss_disc = criterion2(labels_pred,labels.unsqueeze(1),
+                                                              )
+                    loss_adv=criterion2(labels_pred,1-labels.unsqueeze(1),)
+                    
+                def step_optimizer(optimizer, loss,retain_graph=True):
+                    optimizer.zero_grad()
+                    loss.backward(retain_graph=retain_graph)
+                    optimizer.step()
+                step_optimizer(optimizer_dec, loss_seg,retain_graph=True)
+                step_optimizer(optimizer_vgg, loss_disc,retain_graph=True)
+                step_optimizer(optimizer_enc, loss_adv+loss_seg,retain_graph=False)
 
-                    loss2 = balanced_focal_cross_entropy_loss(probs=labels_pred.unsqueeze(2).unsqueeze(3),
-                                                              gt=labels.unsqueeze(
-                                                                  1).unsqueeze(2).unsqueeze(3),
-                                                              focal_gamma=2
-                                                              ).mean()/50
-                loss = loss1+loss2
-                optimizer.zero_grad(set_to_none=True)
-                grad_scaler.scale(loss).backward()
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), gradient_clipping)
-                grad_scaler.step(optimizer)
-                grad_scaler.update()
+                # optimizer.zero_grad(set_to_none=True)
+                # grad_scaler.scale(loss).backward()
+                # torch.nn.utils.clip_grad_norm_(
+                #     model.parameters(), gradient_clipping)
+                # grad_scaler.step(optimizer)
+                # grad_scaler.update()
                 pbar.update(images.shape[0])
                 global_step += 1
-                epoch_loss += loss.item()
+                epoch_loss += loss_seg.item()
                 experiment.log({
-                    'train loss_dir': loss1.item(),
-                    'train loss_adv_source': loss2.item(),
+                    'train loss_seg': loss_seg.item(),
+                    'train loss_disc': loss_disc.item(),
+                    'train loss_adv': loss_adv.item(),
                     'step': global_step,
                     'epoch': epoch,
                 })
-                pbar.set_postfix(**{'loss (batch)': loss.item()})
+                pbar.set_postfix(**{'loss_seg (batch)': loss_seg.item(),
+                                    'loss_disc(batch)': loss_disc.item(),
+                                    'loss_adv(batch)': loss_adv.item(),
+                                    })
                 # Evaluation round
-                division_step = (n_train // (1112*batch_size))
+                division_step = (n_train // (1*batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
@@ -298,13 +322,10 @@ def train_model(
                             if value.grad is not None and not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
                                 histograms['Gradients/' +
                                            tag] = wandb.Histogram(value.grad.data.cpu())
-                        val_score, junk = evaluate(
+                        val_score, eval = evaluate(
                             model, val_loader, device, amp)
-                        # scheduler.step(val_score)
-
                         logging.info(
                             'Validation Dice score: {}'.format(val_score))
-
                         model.eval()
                         source = {}
                         target = {}
@@ -317,8 +338,8 @@ def train_model(
                                 device=device, dtype=torch.float32, memory_format=torch.channels_last)
                             images_tr = images_tr.to(
                                 device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                            pmasks_src = model(images_src)
-                            pmasks_tr = model(images_tr)
+                            pmasks_src,plabel_src = model(images_src)
+                            pmasks_tr,plabel_tr = model(images_tr)
                             images_src = images_src.cpu()
                             pmasks_src7 = (pmasks_src >= 0.7).float().cpu()
                             pmasks_src = (pmasks_src >= 0.5).float().cpu()
@@ -342,10 +363,16 @@ def train_model(
                             break
                             # step_showing+=batch_size
                         experiment.log({
-                            'learning rate': optimizer.param_groups[0]['lr'],
+                            'learning rate enc': optimizer_enc.param_groups[0]['lr'],
+                            'learning rate dec': optimizer_dec.param_groups[0]['lr'],
+                            'learning rate vgg': optimizer_vgg.param_groups[0]['lr'],
                             'validation Dice': val_score,
+                            '_tp_0':eval._tp_per_class[0],
+                            '_fp_0':eval._fp_per_class[0],
+                            '_fn_0':eval._fn_per_class[0],
+                            '_n_received_samples':eval._n_received_samples,
                             'source': source,
-                            'target': target,
+                            # 'target': target,
                             'step': global_step,
                             'epoch': epoch,
                             **histograms
@@ -373,8 +400,8 @@ if __name__ == '__main__':
     args.scale = 1
     args.batch_size = 10
     args.bilinear = False
-    args.epochs = 10
-    args.dir_checkpoint = "Model/vgg_unet/"
+    args.epochs = 5
+    args.dir_checkpoint = "Model/vgg_unet2/"
     args.lr = 1e-5
     args.amp = False
 
@@ -400,7 +427,7 @@ if __name__ == '__main__':
             current_epoch = get_epoch_from_filename(file)+1
             state_dict = torch.load(file, map_location=device)
             model.load_state_dict(state_dict)
-            logging.info(f'Model loaded from {args.load}')
+            logging.info(f'Model loaded from {file}')
         else:
             current_epoch = 1
 

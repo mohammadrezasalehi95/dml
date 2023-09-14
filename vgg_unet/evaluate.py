@@ -1,4 +1,3 @@
-
 from torch import Tensor
 import torch
 from torch.nn import functional as F
@@ -49,13 +48,11 @@ def evaluate(net, dataloader, device, amp):
             # predict the mask
             mask_pred,labels_pred = net(image)
             pp=(mask_pred).detach().cpu().numpy()
-            gt=mask_true.cpu().float().numpy()
-   
-            print(np.max(pp),np.max(gt),"||",np.min(pp),np.min(gt))
+            gt=mask_true.cpu().float().numpy()   
             my_eval.eval(pp,gt)
             if net.n_classes == 1:
                 assert mask_true.min() >= 0 and mask_true.max() <= 1, 'True mask indices should be in [0, 1]'
-                mask_pred = (F.sigmoid(mask_pred) > 0.5).float()
+                mask_pred = ((mask_pred) > 0.5).float()
                 # compute the Dice score
                 dice_score += dice_coeff(mask_pred, mask_true, reduce_batch_first=False)
             else:
