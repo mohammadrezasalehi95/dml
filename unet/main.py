@@ -496,7 +496,7 @@ def test_model(
     model = model.to(memory_format=torch.channels_last)
 
     files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
-    for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:a[1]):
+    for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:-a[1]):
         state_dict = torch.load(file, map_location=device)
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {file} epoch{epoch}')
