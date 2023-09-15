@@ -391,7 +391,7 @@ def train_model(
                                 histograms['Gradients/' +
                                            tag] = wandb.Histogram(value.grad.data.cpu())
 
-                        val_score = evaluate(
+                        val_score,eval = evaluate(
                             model, val_loader, device, amp)
                         # scheduler.step(val_score)
                         logging.info(
