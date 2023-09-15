@@ -392,7 +392,7 @@ def train_model(
                                            tag] = wandb.Histogram(value.grad.data.cpu())
 
                         val_score = evaluate(
-                            model, val_loader, val_showing_loader, device, amp)
+                            model, val_loader, device, amp)
                         # scheduler.step(val_score)
                         logging.info(
                             'Validation Dice score: {}'.format(val_score))
