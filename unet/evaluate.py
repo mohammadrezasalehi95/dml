@@ -45,7 +45,7 @@ def evaluate(net, dataloader, device, amp):
             mask_true = mask_true.to(device=device, dtype=torch.long)
             # labels=labels.to(device=device,dtype=torch.float32 )
             # predict the mask
-            mask_pred,labels_pred = net(image)
+            mask_pred = net(image)
             pp=(mask_pred>=0.5).detach().cpu().numpy()
             gt=mask_true.cpu().numpy()   
             my_eval.eval(pp,gt)
