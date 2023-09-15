@@ -1,3 +1,4 @@
+import glob
 import time
 
 from torch.nn.utils.rnn import pad_sequence
@@ -100,6 +101,7 @@ class UDAModule(nn.Module):
         self.up4 = torch.utils.checkpoint(self.up4)
         self.outc = torch.utils.checkpoint(self.outc)
 
+
 def collate_fn_couple(batch):
     inpput_src, input_tr, gt_src, gt_tr = zip(*batch)
     inpput_src = [torch.from_numpy(np.squeeze(arr)) for arr in inpput_src]
@@ -114,6 +116,7 @@ def collate_fn_couple(batch):
     gt_tr = [torch.from_numpy(np.squeeze(arr)) for arr in gt_tr]
     gt_tr = torch.stack(gt_tr)
     return inpput_src.unsqueeze(1), input_tr.unsqueeze(1), gt_src.unsqueeze(1), gt_tr.unsqueeze(1)
+
 
 def collate_fn_merge(batch):
     images, masks, labels = zip(*batch)
@@ -228,27 +231,27 @@ def train_model(
         model.CRCR3.parameters(),
         model.CRCR4.parameters(),
         model.fc.parameters(),
-        ),
-                              lr=learning_rate, foreach=True)
+    ),
+        lr=learning_rate, foreach=True)
     optimizer_enc = optim.Adam(itertools.chain(
         model.inc.parameters(),
         model.down1.parameters(),
         model.down2.parameters(),
         model.down3.parameters(),
         model.down4.parameters(),
-        ),
-                              lr=learning_rate, foreach=True)
+    ),
+        lr=learning_rate, foreach=True)
     optimizer_dec = optim.Adam(itertools.chain(
         model.up1.parameters(),
         model.up2.parameters(),
         model.up3.parameters(),
         model.up4.parameters(),
         model.outc.parameters(),
-        ),lr=learning_rate, foreach=True)
-    
+    ), lr=learning_rate, foreach=True)
+
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion2 = lambda a ,b: torch.mean(((a-b)**2))
+    def criterion2(a, b): return torch.mean(((a-b)**2))
     global_step = 0
     # 5. Begin training
     for epoch in range(current_epoch, current_epoch+epochs + 1):
@@ -256,7 +259,7 @@ def train_model(
         epoch_loss = 0
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs+current_epoch}', unit='img') as pbar:
             for batch in train_loader:
-                images, true_masks,labels  = batch
+                images, true_masks, labels = batch
                 assert images.shape[1] == model.n_channels, \
                     f'Network has been defined with {model.n_channels} input channels, ' \
                     f'but loaded images have {images.shape[1]} channels. Please check that ' \
@@ -273,20 +276,21 @@ def train_model(
                     # loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
                     ignore_mask = labels.view(B, 1, 1, 1).expand(-1, 1, H, W)
                     loss_seg = balanced_focal_cross_entropy_loss(probs=masks_pred,
-                                                              gt=true_masks,
-                                                              ignore_mask=ignore_mask,
-                                                              focal_gamma=2
-                                                              ).mean()
-                    loss_disc = criterion2(labels_pred,labels.unsqueeze(1),)
-                    loss_adv=criterion2(labels_pred,1-labels.unsqueeze(1),)
-                    
-                def step_optimizer(optimizer, loss,retain_graph=True):
+                                                                 gt=true_masks,
+                                                                 ignore_mask=ignore_mask,
+                                                                 focal_gamma=2
+                                                                 ).mean()
+                    loss_disc = criterion2(labels_pred, labels.unsqueeze(1),)
+                    loss_adv = criterion2(labels_pred, 1-labels.unsqueeze(1),)
+
+                def step_optimizer(optimizer, loss, retain_graph=True):
                     optimizer.zero_grad()
                     loss.backward(retain_graph=retain_graph)
                     optimizer.step()
-                step_optimizer(optimizer_dec, loss_seg,retain_graph=True)
-                step_optimizer(optimizer_vgg, loss_disc,retain_graph=True)
-                step_optimizer(optimizer_enc, loss_adv+loss_seg,retain_graph=False)
+                step_optimizer(optimizer_dec, loss_seg, retain_graph=True)
+                step_optimizer(optimizer_vgg, loss_disc, retain_graph=True)
+                step_optimizer(optimizer_enc, loss_adv +
+                               loss_seg, retain_graph=False)
 
                 # optimizer.zero_grad(set_to_none=True)
                 # grad_scaler.scale(loss).backward()
@@ -343,8 +347,8 @@ def train_model(
                                 device=device, dtype=torch.float32, memory_format=torch.channels_last)
                             images_tr = images_tr.to(
                                 device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                            pmasks_src,plabel_src = model(images_src)
-                            pmasks_tr,plabel_tr = model(images_tr)
+                            pmasks_src, plabel_src = model(images_src)
+                            pmasks_tr, plabel_tr = model(images_tr)
                             images_src = images_src.cpu()
                             pmasks_src7 = (pmasks_src >= 0.7).float().cpu()
                             pmasks_src = (pmasks_src >= 0.5).float().cpu()
@@ -372,10 +376,10 @@ def train_model(
                             'learning rate dec': optimizer_dec.param_groups[0]['lr'],
                             'learning rate vgg': optimizer_vgg.param_groups[0]['lr'],
                             'validation Dice': val_score,
-                            '_tp_0':eval._tp_per_class[0],
-                            '_fp_0':eval._fp_per_class[0],
-                            '_fn_0':eval._fn_per_class[0],
-                            '_n_received_samples':eval._n_received_samples,
+                            '_tp_0': eval._tp_per_class[0],
+                            '_fp_0': eval._fp_per_class[0],
+                            '_fn_0': eval._fn_per_class[0],
+                            '_n_received_samples': eval._n_received_samples,
                             'source': source,
                             'step': global_step,
                             'epoch': epoch,
@@ -389,6 +393,69 @@ def train_model(
                 str(dir_checkpoint + f'checkpoint_epoch{epoch}.pth')))
             logging.info(f'Checkpoint {epoch} saved!')
 
+def test_model(
+    device,
+    dir_checkpoint
+):
+    test_source_dataset = CoupledDataset(dir_1="Vin/",
+                                         dir_1_sep="Vin/sep/V1/",
+                                         size="512/",
+                                         dir_2="DDSM/",
+                                         dir_2_sep="DDSM/sep/ORG/",
+                                         # transform=target_tr,
+                                         # target_transform=target_tr,
+                                         phase='test',
+                                         # wandb_ex=experiment,
+                                         fix_to_first=False,
+                                         )
+    test_target_dataset = CoupledDataset(dir_1="Vin/",
+                                         dir_1_sep="Vin/sep/V1/",
+                                         size="512/",
+                                         dir_2="DDSM/",
+                                         dir_2_sep="DDSM/sep/ORG/",
+                                         # transform=target_tr,
+                                         # target_transform=target_tr,
+                                         phase='test'
+                                         # wandb_ex=experiment,
+                                         )
+
+    n_s = len(test_source_dataset)
+    n_t = len(test_target_dataset)
+
+    loader_args = dict(batch_size=16,)
+    test_source_loader = torch.utils.data.DataLoader(dataset=test_source_dataset,
+                                                     num_workers=1,
+                                                     shuffle=False, **loader_args, collate_fn=collate_fn_couple)
+    test_target_loader = torch.utils.data.DataLoader(dataset=test_target_dataset,
+                                                     num_workers=1,
+                                                     shuffle=False, **loader_args, collate_fn=collate_fn_couple)
+    
+    files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
+    for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:a[1]):
+        model = UDAModule(n_channels=1, n_classes=1)
+        model = model.to(memory_format=torch.channels_last)
+        state_dict = torch.load(file, map_location=device)
+        model.load_state_dict(state_dict)
+        logging.info(f'Model loaded from {file} epoch{epoch}')
+        model.to(device)
+
+
+        def test(model,loader,device,message,is_source):    
+            dice_score, eval = evaluate(
+                model, loader, device, True,is_source)
+            logging.info(
+                f'''
+                {message} Dice score: {dice_score}
+                '_tp':{eval._tp_per_class[1]},
+                '_fp':{eval._fp_per_class[1]},
+                '_fn':{eval._fn_per_class[1]},
+                '_n_received_samples':{eval._n_received_samples},
+                ''')
+        test(model,test_source_loader,device,message=f"Test Source epoch {epoch}",is_source=True)
+        test(model,test_target_loader,device,message=f"Test Target epoch {epoch}",is_source=False)
+        del model
+
+        
 
 if __name__ == '__main__':
     class Temp:
@@ -396,6 +463,7 @@ if __name__ == '__main__':
             pass
 
     args = Temp()
+    args.Test=True
     args.load = True
     args.amp = False
     args.classes = 1
@@ -434,7 +502,11 @@ if __name__ == '__main__':
             current_epoch = 1
 
     model.to(device=device)
-
+    if args.Test:
+        test_model(
+            device=device,
+            dir_checkpoint=args.dir_checkpoint,
+        )
     train_model(
         model=model,
         current_epoch=current_epoch,
@@ -445,3 +517,5 @@ if __name__ == '__main__':
         amp=args.amp,
         dir_checkpoint=args.dir_checkpoint,
     )
+
+

@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
-
+import glob
 import numpy as np
 from PIL import Image
 from matplotlib import pyplot as plt
@@ -456,12 +456,74 @@ def train_model(
             logging.info(f'Checkpoint {epoch} saved!')
 
 
+def test_model(
+    device,
+    dir_checkpoint
+):
+    test_source_dataset = CoupledDataset(dir_1="Vin/",
+                                         dir_1_sep="Vin/sep/V1/",
+                                         size="512/",
+                                         dir_2="DDSM/",
+                                         dir_2_sep="DDSM/sep/ORG/",
+                                         # transform=target_tr,
+                                         # target_transform=target_tr,
+                                         phase='test',
+                                         # wandb_ex=experiment,
+                                         fix_to_first=False,
+                                         )
+    test_target_dataset = CoupledDataset(dir_1="Vin/",
+                                         dir_1_sep="Vin/sep/V1/",
+                                         size="512/",
+                                         dir_2="DDSM/",
+                                         dir_2_sep="DDSM/sep/ORG/",
+                                         # transform=target_tr,
+                                         # target_transform=target_tr,
+                                         phase='test'
+                                         # wandb_ex=experiment,
+                                         )
+
+    n_s = len(test_source_dataset)
+    n_t = len(test_target_dataset)
+
+    loader_args = dict(batch_size=16,)
+    test_source_loader = torch.utils.data.DataLoader(dataset=test_source_dataset,
+                                                     num_workers=1,
+                                                     shuffle=False, **loader_args, collate_fn=collate_fn)
+    test_target_loader = torch.utils.data.DataLoader(dataset=test_target_dataset,
+                                                     num_workers=1,
+                                                     shuffle=False, **loader_args, collate_fn=collate_fn)
+    
+    files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
+    for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:a[1]):
+        model = UNet(n_channels=1, n_classes=1)
+        model = model.to(memory_format=torch.channels_last)
+        state_dict = torch.load(file, map_location=device)
+        model.load_state_dict(state_dict)
+        logging.info(f'Model loaded from {file} epoch{epoch}')
+        model.to(device)
+
+        def test(model,loader,device,message,is_source):    
+            dice_score, eval = evaluate(
+                model, loader, device, True,is_source)
+            logging.info(
+                f'''
+                {message} Dice score: {dice_score}
+                '_tp':{eval._tp_per_class[1]},
+                '_fp':{eval._fp_per_class[1]},
+                '_fn':{eval._fn_per_class[1]},
+                '_n_received_samples':{eval._n_received_samples},
+                ''')
+        test(model,test_source_loader,device,message=f"Test Source epoch {epoch}",is_source=True)
+        test(model,test_target_loader,device,message=f"Test Target epoch {epoch}",is_source=False)
+        del model
+
 if __name__ == '__main__':
     class Temp:
         def __init__(self):
             pass
 
     args = Temp()
+    args.Test=True
     args.load = True
     args.amp = False
     args.classes = 1
@@ -482,6 +544,12 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
+    if args.Test:
+        test_model(
+            device=device,
+            dir_checkpoint=args.dir_checkpoint,
+        )
+
     model = UNet(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
 
