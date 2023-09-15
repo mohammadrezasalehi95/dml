@@ -432,10 +432,11 @@ def train_model(
                             break
                             # step_showing+=batch_size
                         experiment.log({
-                            'learning rate': optimizer.param_groups[0]['lr'],
                             'validation Dice': val_score,
+                            '_tp':eval._tp_per_class[1],
+                            '_fp':eval._fp_per_class[1],
+                            '_fn':eval._fn_per_class[1],
                             'source': source,
-                            'target': target,
                             'step': global_step,
                             'epoch': epoch,
                             **histograms

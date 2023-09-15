@@ -1,3 +1,4 @@
+from utils import get_epoch_from_filename, load_recentliest_file
 from datasets import CoupledDataset
 import torch.nn.functional as F
 import os
@@ -17,6 +18,7 @@ import losses
 import wandb
 import itertools
 from tqdm import tqdm
+import logging
 # Assuming the necessary modules are defined in the following files
 # import data_loader, losses, model
 # from stats_func import *
@@ -41,7 +43,7 @@ def collate_fn(batch):
 
 
 class SIFA:
-    def __init__(self, config, device):
+    def __init__(self, config):
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
         # self._source_train_pth = config['source_train_pth']
         # self._target_train_pth = config['target_train_pth']
@@ -67,29 +69,48 @@ class SIFA:
         self._to_restore = bool(config['to_restore'])
         self._checkpoint_dir = config['checkpoint_dir']
 
-        # Define the models
-        # self.model_A = model.ModelA().to(device)
-        # self.model_B = model.ModelB().to(device)
-        # self.discriminator = model.Discriminator().to(device)
+        class Temp:
+            def __init__(self):
+                pass
 
-        # Define the optimizers
-        self.optimizer_A = optim.Adam(
-            self.model_A.parameters(), lr=self._base_lr)
-        self.optimizer_B = optim.Adam(
-            self.model_B.parameters(), lr=self._base_lr)
-        self.optimizer_D = optim.Adam(
-            self.discriminator.parameters(), lr=self._base_lr)
+        args = Temp()
+        args.load = True
+        args.amp = False
+        args.classes = 1
+        self.batch_size = 10
+        args.bilinear = False
+        self.epochs = 5
+        self.dir_checkpoint = "Model/SIFA/"
+        self.lr = 1e-5
 
-        # Define the loss functions
-        self.criterion_GAN = losses.GANLoss().to(device)
-        self.criterion_cycle = losses.CycleConsistencyLoss().to(device)
-        self.criterion_identity = losses.IdentityLoss().to(device)
+        logging.basicConfig(level=logging.INFO,
+                            format='%(levelname)s: %(message)s')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logging.info(f'Using device {device}')
+        # Change here to adapt to your data
+        # n_channels=3 for RGB images
+        # n_classes is the number of probabilities you want to get per pixel   
+        model = SIFAModule(n_channels=1, n_classes=1,skip=self._skip)
+        model = model.to(memory_format=torch.channels_last)
+        
+        logging.info(f'Network:\n'
+                    f'\t{model.n_channels} input channels\n'
+                    f'\t{model.n_classes} output channels (classes)\n'
+                    f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
+
+        if args.load:
+            file = load_recentliest_file(self.dir_checkpoint)
+            if file:
+                self.current_epoch = get_epoch_from_filename(file)+1
+                state_dict = torch.load(file, map_location=device)
+                model.load_state_dict(state_dict)
+                logging.info(f'Model loaded from {file}')
+            else:
+                self.current_epoch = 1
         self.device = device
-        # Load datasets
-        # self.dataloader_source_train = DataLoader(data_loader.CustomDataset(self._source_train_pth),
-        #                                           batch_size=self._batch_size, shuffle=True)
-        # self.dataloader_target_train = DataLoader(data_loader.CustomDataset(self._target_train_pth),
-        #                                           batch_size=self._batch_size, shuffle=True)
+        model.to(device=device)
+        self.model=model
+        
 
     def model_setup(self):
         self.discriminator_A_vars = [
@@ -185,7 +206,10 @@ class SIFA:
         )
         return g_loss_A, g_loss_B, seg_loss_B, d_loss_A, d_loss_B, d_loss_P, d_loss_P_ll
 
-    def train(self, model,epochs):
+    def train(self):
+        model=self.model
+        current_epoch=self.current_epoch
+        epochs=self.epochs
         # Training loop
         train_dataset = CoupledDataset(dir_1="Vin/",
                                       dir_1_sep="Vin/sep/V1/",
@@ -253,7 +277,7 @@ class SIFA:
                                                    ), lr=self.learning_rate_seg)
         global_step = 0
         wandb.init(project='SIFA', resume='allow', anonymous='must')
-        for epoch in range(1, epochs + 1):
+        for epoch in range(current_epoch, current_epoch+epochs + 1):
             model.train()
             epoch_loss = 0
             with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
@@ -346,21 +370,34 @@ class SIFA:
                     step_optimizer(discriminator_P_optimizer, d_loss_P)
                     step_optimizer(discriminator_P_ll_optimizer, d_loss_P_ll)
                     step_optimizer(segmenter_B_optimizer, seg_loss_B)
+            
+            if self.dir_checkpoint:
+                state_dict = model.state_dict()
+                torch.save(state_dict, os_support_path(
+                    str(self.dir_checkpoint + f'checkpoint_epoch{epoch}.pth')))
+                logging.info(f'Checkpoint {epoch} saved!')
+
+
+                
                     
+def main(config_filename):
+    # Set the seed for reproducibility
+    torch.manual_seed(1234)
+    np.random.seed(1234)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(1234)
+
+    with open(config_filename) as config_file:
+        config = json.load(config_file)
+
+    sifa_model = SIFA(config)
+    sifa_model.train()
+
+
+
+
 
 
 if __name__ == '__main__':
-
-    def main(config_filename):
-        # Set the seed for reproducibility
-        torch.manual_seed(1234)
-        np.random.seed(1234)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(1234)
-
-        with open(config_filename) as config_file:
-            config = json.load(config_file)
-
-        sifa_model = SIFA(config)
-        sifa_model.train()
     main(config_filename=os_support_path('cyclegan/config_param.json'))
+    

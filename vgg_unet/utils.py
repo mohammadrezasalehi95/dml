@@ -144,7 +144,7 @@ class Eval_FP():
     def __init__(self):
         self._threshold=.5
         self._n_received_samples=0
-        self._c=1
+        self._c=2
         self._tp_per_class: List[float] = np.zeros((self._c,), dtype=int)
         self._fp_per_class: List[float] = np.zeros_like(self._tp_per_class)
         self._fn_per_class: List[float] = np.zeros_like(self._tp_per_class)
@@ -161,11 +161,9 @@ class Eval_FP():
         for c in range(1, self._c):
             preds_c = (preds == c).astype(int)
             ground_truths_c = (ground_truths == c).astype(int)
-
+            
             for gt, pd in zip(ground_truths_c, preds_c):
-
                 self._n_received_samples += 1
- 
                 gt_labels = measure.label(gt)
                 pd_labels = measure.label(pd)
 
@@ -194,4 +192,3 @@ class Eval_FP():
                                 (gt == 1)) / \
                             np.sum(pd_obj_mask) < self._threshold:
                         self._fp_per_class[c] += 1
-                

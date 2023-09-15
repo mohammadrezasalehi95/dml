@@ -40,9 +40,9 @@ torch.cuda.manual_seed_all(12345)
 """#Model"""
 
 
-class UNet(nn.Module):
+class UDAModule(nn.Module):
     def __init__(self, n_channels, n_classes, bilinear=False):
-        super(UNet, self).__init__()
+        super(UDAModule, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
@@ -277,8 +277,7 @@ def train_model(
                                                               ignore_mask=ignore_mask,
                                                               focal_gamma=2
                                                               ).mean()
-                    loss_disc = criterion2(labels_pred,labels.unsqueeze(1),
-                                                              )
+                    loss_disc = criterion2(labels_pred,labels.unsqueeze(1),)
                     loss_adv=criterion2(labels_pred,1-labels.unsqueeze(1),)
                     
                 def step_optimizer(optimizer, loss,retain_graph=True):
@@ -325,7 +324,13 @@ def train_model(
                         val_score, eval = evaluate(
                             model, val_loader, device, amp)
                         logging.info(
-                            'Validation Dice score: {}'.format(val_score))
+                            f'''
+                            Validation Dice score: {val_score}
+                            '_tp':{eval._tp_per_class[1]},
+                            '_fp':{eval._fp_per_class[1]},
+                            '_fn':{eval._fn_per_class[1]},
+                            '_n_received_samples':{eval._n_received_samples},
+                            ''')
                         model.eval()
                         source = {}
                         target = {}
@@ -372,7 +377,6 @@ def train_model(
                             '_fn_0':eval._fn_per_class[0],
                             '_n_received_samples':eval._n_received_samples,
                             'source': source,
-                            # 'target': target,
                             'step': global_step,
                             'epoch': epoch,
                             **histograms
@@ -380,7 +384,6 @@ def train_model(
                         model.train()
 
         if dir_checkpoint:
-
             state_dict = model.state_dict()
             torch.save(state_dict, os_support_path(
                 str(dir_checkpoint + f'checkpoint_epoch{epoch}.pth')))
@@ -388,7 +391,6 @@ def train_model(
 
 
 if __name__ == '__main__':
-
     class Temp:
         def __init__(self):
             pass
@@ -413,7 +415,7 @@ if __name__ == '__main__':
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
 
-    model = UNet(n_channels=1, n_classes=1)
+    model = UDAModule(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'

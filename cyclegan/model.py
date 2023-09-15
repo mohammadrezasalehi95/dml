@@ -5,11 +5,6 @@ import torch.nn.functional as F
 import json
 
 # Load config file
-with open('./config_param.json') as config_file:
-    config = json.load(config_file)
-
-BATCH_SIZE = int(config['batch_size'])
-POOL_SIZE = int(config['pool_size'])
 
 # The height of each image.
 IMG_HEIGHT = 256
@@ -128,32 +123,6 @@ class Discriminator(nn.Module):
 
     def forward(self, input):
         return self.model(input)
-class DiscriminatorAux(nn.Module):
-    def __init__(self, input_nc, ndf=64, norm_layer=nn.BatchNorm2d):
-        super(DiscriminatorAux, self).__init__()
-
-        self.padding = nn.ConstantPad2d(2, 0)
-
-        self.conv1 = GeneralConv2d(input_nc, ndf, kernel_size=4, stride=2, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
-        self.conv2 = GeneralConv2d(ndf, ndf * 2, kernel_size=4, stride=2, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
-        self.conv3 = GeneralConv2d(ndf * 2, ndf * 4, kernel_size=4, stride=2, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
-        self.conv4 = GeneralConv2d(ndf * 4, ndf * 8, kernel_size=4, stride=1, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
-        self.conv5 = GeneralConv2d(ndf * 8, 2, kernel_size=4, stride=1, padding=0, use_bias=False, activation=None)
-
-    def forward(self, input):
-        x = self.padding(input)
-        x = self.conv1(x)
-        x = self.padding(x)
-        x = self.conv2(x)
-        x = self.padding(x)
-        x = self.conv3(x)
-        x = self.padding(x)
-        x = self.conv4(x)
-        x = self.padding(x)
-        x = self.conv5(x)
-        
-        return x[..., 0].unsqueeze(1), x[..., 1].unsqueeze(1)
-    
 
 class DRNBlock(nn.Module):
     def __init__(self, dim, norm_layer=None, dropout_rate=0.25):
@@ -200,31 +169,31 @@ class DRNBlockDS(nn.Module):
         input = self.pad3(input)
 
         return F.relu(x + input)
+    
 class DiscriminatorAux(nn.Module):
-    def __init__(self, ndf, f=4, padw=2):
+    def __init__(self, input_nc, ndf=64, norm_layer=nn.BatchNorm2d):
         super(DiscriminatorAux, self).__init__()
-        self.ndf = ndf
-        self.f = f
-        self.padw = padw
-        self.conv1 = GeneralConv2d(1, ndf, f, 2, 0, activation_factor=0.2)
-        self.conv2 = GeneralConv2d(ndf, ndf*2, f, 2, 0, activation_factor=0.2)
-        self.conv3 = GeneralConv2d(ndf*2, ndf*4, f, 2, 0, activation_factor=0.2)
-        self.conv4 = GeneralConv2d(ndf*4, ndf*8, f, 1, 0, activation_factor=0.2)
-        self.conv5 = GeneralConv2d(ndf*8, 2, f, 1, 0, activation_factor=0, norm_type=None)
-
-    def forward(self, x):
-        x = F.pad(x, (self.padw, self.padw, self.padw, self.padw))
-        x = self.conv1(x)
-        x = F.pad(x, (self.padw, self.padw, self.padw, self.padw))
-        x = self.conv2(x)
-        x = F.pad(x, (self.padw, self.padw, self.padw, self.padw))
-        x = self.conv3(x)
-        x = F.pad(x, (self.padw, self.padw, self.padw, self.padw))
-        x = self.conv4(x)
-        x = F.pad(x, (self.padw, self.padw, self.padw, self.padw))
-        x = self.conv5(x)
+        self.padding = nn.ConstantPad2d(2, 0)
+        self.conv1 = GeneralConv2d(input_nc, ndf, kernel_size=4, stride=2, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
         
+        self.conv2 = GeneralConv2d(ndf, ndf * 2, kernel_size=4, stride=2, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
+        self.conv3 = GeneralConv2d(ndf * 2, ndf * 4, kernel_size=4, stride=2, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
+        self.conv4 = GeneralConv2d(ndf * 4, ndf * 8, kernel_size=4, stride=1, padding=0, norm_layer=norm_layer, use_bias=False, activation=nn.LeakyReLU(0.2, True))
+        self.conv5 = GeneralConv2d(ndf * 8, 2, kernel_size=4, stride=1, padding=0, use_bias=False, activation=None)
+
+    def forward(self, input):
+        x = self.padding(input)
+        x = self.conv1(x)
+        x = self.padding(x)
+        x = self.conv2(x)
+        x = self.padding(x)
+        x = self.conv3(x)
+        x = self.padding(x)
+        x = self.conv4(x)
+        x = self.padding(x)
+        x = self.conv5(x)
         return x[..., 0].unsqueeze(1), x[..., 1].unsqueeze(1)
+    
 
 class ResnetGenerator(nn.Module):
     def __init__(self, input_nc,output_nc=1, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=9, padding_type='reflect',skip=False):
@@ -437,32 +406,32 @@ class SIFAModule(nn.Module):
         self.discriminator_B = Discriminator()
         self.discriminator_P = Discriminator()
         self.discriminator_P_ll = Discriminator()
-        self.generator_A = ResnetGenerator(n_blocks=9)
-        self.encoder_B = Encoder()
-        self.decoder_B = Decoder()
+        self.generator_A = ResnetGenerator(n_blocks=9,skip=skip)
+        self.encoder_B = Encoder(skip=skip)
+        self.decoder_B = Decoder(skip=skip)
         self.segmenter_B = Segmenter()
         self.segmenter_B_ll = Segmenter()
         self.drop_out_rate=0.25
         self.fc=nn.Linear(512, 1)
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, inputs,skip=False):
+    def forward(self, inputs):
         images_a = inputs['images_a']
         images_b = inputs['images_b']
         fake_pool_a = inputs['fake_pool_a']
         fake_pool_b = inputs['fake_pool_b']
         prob_real_a_is_real, prob_real_a_aux = self.discriminator_aux_A(images_a)
         prob_real_b_is_real = self.discriminator_B(images_b)
-        fake_images_b = self.generator_A(images_a, images_a, skip=skip)
-        latent_b, latent_b_ll = self.encoder_B(images_b, skip=skip, drop_out_rate=self.drop_out_rate)
-        fake_images_a = self.decoder_B(latent_b, images_b, skip=skip)
+        fake_images_b = self.generator_A(images_a, images_a,)
+        latent_b, latent_b_ll = self.encoder_B(images_b, drop_out_rate=self.drop_out_rate)
+        fake_images_a = self.decoder_B(latent_b, images_b)
         pred_mask_b = self.segmenter_B(latent_b)
         pred_mask_b_ll = self.segmenter_B_ll(latent_b_ll)
         prob_fake_a_is_real, prob_fake_a_aux_is_real = self.discriminator_aux_A(fake_images_a)
         prob_fake_b_is_real = self.discriminator_B(fake_images_b)
-        latent_fake_b, latent_fake_b_ll = self.encoder_B(fake_images_b, skip=skip, drop_out_rate=self.drop_out_rate)
-        cycle_images_b = self.generator_A(fake_images_a, fake_images_a, skip=skip)
-        cycle_images_a = self.decoder_B(latent_fake_b, fake_images_b, skip=skip)
+        latent_fake_b, latent_fake_b_ll = self.encoder_B(fake_images_b, drop_out_rate=self.drop_out_rate)
+        cycle_images_b = self.generator_A(fake_images_a, fake_images_a)
+        cycle_images_a = self.decoder_B(latent_fake_b, fake_images_b)
         pred_mask_fake_b = self.segmenter_B(latent_fake_b,drop_out_rate=self.drop_out_rate)
         pred_mask_fake_b_ll = self.segmenter_B_ll(latent_fake_b_ll,drop_out_rate=self.drop_out_rate)
         prob_fake_pool_a_is_real, prob_fake_pool_a_aux_is_real = self.discriminator_aux_A(fake_pool_a)

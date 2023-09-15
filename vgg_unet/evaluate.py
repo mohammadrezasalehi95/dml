@@ -28,7 +28,6 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     # Dice loss (objective to minimize) between 0 and 1
     fn = multiclass_dice_coeff if multiclass else dice_coeff
     return 1 - fn(input, target, reduce_batch_first=True)
-import wandb
 @torch.inference_mode()
 def evaluate(net, dataloader, device, amp):
     net.eval()
@@ -47,8 +46,8 @@ def evaluate(net, dataloader, device, amp):
             # labels=labels.to(device=device,dtype=torch.float32 )
             # predict the mask
             mask_pred,labels_pred = net(image)
-            pp=(mask_pred).detach().cpu().numpy()
-            gt=mask_true.cpu().float().numpy()   
+            pp=(mask_pred>=0.5).detach().cpu().numpy()
+            gt=mask_true.cpu().numpy()   
             my_eval.eval(pp,gt)
             if net.n_classes == 1:
                 assert mask_true.min() >= 0 and mask_true.max() <= 1, 'True mask indices should be in [0, 1]'
