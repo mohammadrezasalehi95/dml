@@ -148,7 +148,7 @@ class Eval_FP():
         self._tp_per_class: List[float] = np.zeros((self._c,), dtype=int)
         self._fp_per_class: List[float] = np.zeros_like(self._tp_per_class)
         self._fn_per_class: List[float] = np.zeros_like(self._tp_per_class)
-        self._tp_fn_threshold=0.5
+        self._tp_fn_threshold=0.1
         pass
     def eval(self,prediction,ground_truth):
         # fill this 
