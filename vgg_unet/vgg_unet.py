@@ -429,11 +429,11 @@ def test_model(
     test_target_loader = torch.utils.data.DataLoader(dataset=test_target_dataset,
                                                      num_workers=1,
                                                      shuffle=False, **loader_args, collate_fn=collate_fn_couple)
+    model = UDAModule(n_channels=1, n_classes=1)
+    model = model.to(memory_format=torch.channels_last)
     
     files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
     for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:a[1]):
-        model = UDAModule(n_channels=1, n_classes=1)
-        model = model.to(memory_format=torch.channels_last)
         state_dict = torch.load(file, map_location=device)
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {file} epoch{epoch}')
@@ -453,7 +453,6 @@ def test_model(
                 ''')
         test(model,test_source_loader,device,message=f"Test Source epoch {epoch}",is_source=True)
         test(model,test_target_loader,device,message=f"Test Target epoch {epoch}",is_source=False)
-        del model
 
         
 
