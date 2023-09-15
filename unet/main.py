@@ -395,7 +395,13 @@ def train_model(
                             model, val_loader, device, amp)
                         # scheduler.step(val_score)
                         logging.info(
-                            'Validation Dice score: {}'.format(val_score))
+                            f'''
+                            Validation Dice score: {val_score}
+                            '_tp':{eval._tp_per_class[1]},
+                            '_fp':{eval._fp_per_class[1]},
+                            '_fn':{eval._fn_per_class[1]},
+                            '_n_received_samples':{eval._n_received_samples},
+                            ''')
                         model.eval()
                         source = {}
                         target = {}
