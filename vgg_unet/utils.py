@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch
 from torch import Tensor
 from typing import Optional
-from skimage import measure
+from skimage import morphology, measure
 import csv
 import os
 import glob
@@ -162,6 +162,11 @@ class Eval_FP():
             preds_c = (preds == c).astype(int)
             ground_truths_c = (ground_truths == c).astype(int)
             
+            preds_c = morphology.erosion(preds_c)
+            preds_c = morphology.dilation(preds_c)
+            preds_c = morphology.dilation(preds_c)
+            preds_c = morphology.erosion(preds_c)
+
             for gt, pd in zip(ground_truths_c, preds_c):
                 self._n_received_samples += 1
                 gt_labels = measure.label(gt)

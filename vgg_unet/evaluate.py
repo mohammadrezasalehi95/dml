@@ -29,7 +29,7 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     fn = multiclass_dice_coeff if multiclass else dice_coeff
     return 1 - fn(input, target, reduce_batch_first=True)
 @torch.inference_mode()
-def evaluate(net, dataloader, device, amp,is_source=True):
+def evaluate(net, dataloader, device, amp,is_source=True,read_model_result=lambda a:a):
     net.eval()
     num_val_batches = len(dataloader)
     dice_score = 0
@@ -48,7 +48,7 @@ def evaluate(net, dataloader, device, amp,is_source=True):
             mask_true = mask_true.to(device=device, dtype=torch.long)
             # labels=labels.to(device=device,dtype=torch.float32 )
             # predict the mask
-            mask_pred,labels_pred = net(image)
+            mask_pred = read_model_result(net(image))
             pp=(mask_pred>=0.5).detach().cpu().numpy()
             gt=mask_true.cpu().numpy()   
             my_eval.eval(pp,gt)

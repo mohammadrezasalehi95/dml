@@ -17,8 +17,6 @@ def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, 
 
     dice = (inter + epsilon) / (sets_sum + epsilon)
     return dice.mean()
-
-
 def multiclass_dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon: float = 1e-6):
     # Average of Dice coefficient for all classes
     return dice_coeff(input.flatten(0, 1), target.flatten(0, 1), reduce_batch_first, epsilon)
@@ -29,27 +27,26 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     fn = multiclass_dice_coeff if multiclass else dice_coeff
     return 1 - fn(input, target, reduce_batch_first=True)
 @torch.inference_mode()
-def evaluate(net, dataloader, device, amp,is_source=True):
+def evaluate(net, dataloader, device, amp,is_source=True,read_model_result=lambda a:a):
     net.eval()
     num_val_batches = len(dataloader)
     dice_score = 0
     my_eval=Eval_FP()
 
     # iterate over the validation set
-    with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp,):
+    with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
         
         for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch', position=0,leave=False):
             if is_source:
                 image,gb_i, mask_true ,gb_m= batch
             else:
                 gb_i,image ,gb_m, mask_true = batch
-                
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
             mask_true = mask_true.to(device=device, dtype=torch.long)
             # labels=labels.to(device=device,dtype=torch.float32 )
             # predict the mask
-            mask_pred = net(image)
+            mask_pred = read_model_result(net(image))
             pp=(mask_pred>=0.5).detach().cpu().numpy()
             gt=mask_true.cpu().numpy()   
             my_eval.eval(pp,gt)
@@ -65,7 +62,5 @@ def evaluate(net, dataloader, device, amp,is_source=True):
                 mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 3, 1, 2).float()
                 # compute the Dice score, ignoring background
                 dice_score += multiclass_dice_coeff(mask_pred[:, 1:], mask_true[:, 1:], reduce_batch_first=False)
-            
-
     net.train()
     return dice_score / max(num_val_batches, 1), my_eval

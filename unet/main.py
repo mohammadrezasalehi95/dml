@@ -285,18 +285,30 @@ def train_model(
                                          dir_2_sep="DDSM/sep/ORG/",
                                          # transform=target_tr,
                                          # target_transform=target_tr,
-                                         phase='val2'
+                                         phase='val2',
                                          # wandb_ex=experiment,
                                          )
-    test_dataset = CoupledDataset(dir_1="Vin/",
+    test_dataset_s = CoupledDataset(dir_1="Vin/",
                                   dir_1_sep="Vin/sep/V1/",
                                   size="512/",
                                   dir_2="DDSM/",
                                   dir_2_sep="DDSM/sep/ORG/",
                                   # transform=target_tr,
                                   # target_transform=target_tr,
-                                  phase='test'
+                                  phase='test',
                                   # wandb_ex=experiment,
+                                  fix_to_first=False,
+                                  )
+    test_dataset_t = CoupledDataset(dir_1="Vin/",
+                                  dir_1_sep="Vin/sep/V1/",
+                                  size="512/",
+                                  dir_2="DDSM/",
+                                  dir_2_sep="DDSM/sep/ORG/",
+                                  # transform=target_tr,
+                                  # target_transform=target_tr,
+                                  phase='test',
+                                  # wandb_ex=experiment,
+                                  fix_to_first=True,
                                   )
 
     n_train = len(train_dataset)
@@ -310,8 +322,10 @@ def train_model(
         dataset=val_dataset, shuffle=False, drop_last=True, **loader_args,num_workers=1)
     val_showing_loader = torch.utils.data.DataLoader(
         dataset=val_showing_dataset, shuffle=False, **loader_args,num_workers=1)
-    test_loader = torch.utils.data.DataLoader(
-        dataset=test_dataset, shuffle=False, drop_last=True, **loader_args,num_workers=1)
+    test_loader_s = torch.utils.data.DataLoader(
+        dataset=test_dataset_s, shuffle=False, drop_last=True, **loader_args,num_workers=1)
+    test_loader_t = torch.utils.data.DataLoader(
+        dataset=test_dataset_t, shuffle=False, drop_last=True, **loader_args,num_workers=1)
 
     # (Initialize logging)
     experiment = wandb.init(project='Unet',
@@ -391,16 +405,26 @@ def train_model(
                                 histograms['Gradients/' +
                                            tag] = wandb.Histogram(value.grad.data.cpu())
 
-                        val_score,eval = evaluate(
-                            model, val_loader, device, amp)
+                        s_score,s_eval = evaluate(
+                            model, test_loader_s, device, amp)
+                        t_score,t_eval = evaluate(
+                            model, test_loader_t, device, amp)
                         # scheduler.step(val_score)
                         logging.info(
                             f'''
-                            Validation Dice score: {val_score}
-                            '_tp':{eval._tp_per_class[1]},
-                            '_fp':{eval._fp_per_class[1]},
-                            '_fn':{eval._fn_per_class[1]},
-                            '_n_received_samples':{eval._n_received_samples},
+                            source Dice score: {s_score}
+                            '_tp':{s_eval._tp_per_class[1]},
+                            '_fp':{s_eval._fp_per_class[1]},
+                            '_fn':{s_eval._fn_per_class[1]},
+                            '_n_received_samples':{s_eval._n_received_samples},
+                            ''')
+                        logging.info(
+                            f'''
+                            target Dice score: {t_score}
+                            '_tp':{t_eval._tp_per_class[1]},
+                            '_fp':{t_eval._fp_per_class[1]},
+                            '_fn':{t_eval._fn_per_class[1]},
+                            '_n_received_samples':{t_eval._n_received_samples},
                             ''')
                         model.eval()
                         source = {}
@@ -437,16 +461,16 @@ def train_model(
                             })
                             break
                             # step_showing+=batch_size
-                        experiment.log({
-                            'validation Dice': val_score,
-                            '_tp':eval._tp_per_class[1],
-                            '_fp':eval._fp_per_class[1],
-                            '_fn':eval._fn_per_class[1],
-                            'source': source,
-                            'step': global_step,
-                            'epoch': epoch,
-                            **histograms
-                        })
+                        # experiment.log({
+                        #     'validation Dice': val_score,
+                        #     '_tp':eval._tp_per_class[1],
+                        #     '_fp':eval._fp_per_class[1],
+                        #     '_fn':eval._fn_per_class[1],
+                        #     'source': source,
+                        #     'step': global_step,
+                        #     'epoch': epoch,
+                        #     **histograms
+                        # })
                         model.train()
         if dir_checkpoint:
 
@@ -454,7 +478,6 @@ def train_model(
             torch.save(state_dict, os_support_path(
                 str(dir_checkpoint + f'checkpoint_epoch{epoch}.pth')))
             logging.info(f'Checkpoint {epoch} saved!')
-
 
 def test_model(
     device,
@@ -494,7 +517,7 @@ def test_model(
                                                      shuffle=False, **loader_args, collate_fn=collate_fn)
     model = UNet(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
-
+    
     files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
     for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:-a[1]):
         state_dict = torch.load(file, map_location=device)
@@ -502,9 +525,10 @@ def test_model(
         logging.info(f'Model loaded from {file} epoch{epoch}')
         model.to(device)
 
+
         def test(model,loader,device,message,is_source):    
             dice_score, eval = evaluate(
-                model, loader, device, True,is_source)
+                model, loader, device, True,is_source )
             logging.info(
                 f'''
                 {message} Dice score: {dice_score}
@@ -516,23 +540,22 @@ def test_model(
         test(model,test_source_loader,device,message=f"Test Source epoch {epoch}",is_source=True)
         test(model,test_target_loader,device,message=f"Test Target epoch {epoch}",is_source=False)
 
-
 if __name__ == '__main__':
     class Temp:
         def __init__(self):
             pass
 
     args = Temp()
-    args.Test=True
+    args.Test=False
     args.load = True
     args.amp = False
     args.classes = 1
     args.scale = 1
-    args.batch_size = 4
+    args.batch_size = 10
     args.bilinear = False
     args.epochs = 10
-    args.dir_checkpoint = "Model/unet2/"
-    args.lr = 1e-5
+    args.dir_checkpoint = "Model/unet3/"
+    args.lr = 1e-4
     args.amp = False
 
     torch.cuda.device_count()
@@ -549,7 +572,6 @@ if __name__ == '__main__':
             device=device,
             dir_checkpoint=args.dir_checkpoint,
         )
-
     model = UNet(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
 

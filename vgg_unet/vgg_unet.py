@@ -39,7 +39,7 @@ torch.cuda.manual_seed_all(12345)
 
 
 """#Model"""
-
+eval_read_model_result=lambda a: a[0]
 
 class UDAModule(nn.Module):
     def __init__(self, n_channels, n_classes, bilinear=False):
@@ -326,7 +326,7 @@ def train_model(
                                 histograms['Gradients/' +
                                            tag] = wandb.Histogram(value.grad.data.cpu())
                         val_score, eval = evaluate(
-                            model, val_loader, device, amp)
+                            model, val_loader, device, amp,read_model_result=eval_read_model_result)
                         logging.info(
                             f'''
                             Validation Dice score: {val_score}
@@ -442,7 +442,7 @@ def test_model(
 
         def test(model,loader,device,message,is_source):    
             dice_score, eval = evaluate(
-                model, loader, device, True,is_source)
+                model, loader, device, True,is_source ,read_model_result=eval_read_model_result)
             logging.info(
                 f'''
                 {message} Dice score: {dice_score}
