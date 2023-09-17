@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch
 from torch import Tensor
 from typing import Optional
-from skimage import morphology, measure
+from skimage import measure,morphology
 import csv
 import os
 import glob
@@ -15,7 +15,7 @@ import re
 from torch.nn import functional as F
 
 def get_epoch_from_filename(filename):
-    match = re.search(r'.*checkpoint_epoch(\d+).pth', filename)
+    match = re.search(r'.*checkpoint_epoch(\d+).*.pth', filename)
     if match:
         return int(match.group(1))
     else:
@@ -136,19 +136,21 @@ def balanced_focal_cross_entropy_loss(
                         c_probs,
                         torch.ones_like(c_probs),
                         weight=w))
+    if len(losses)==2:
+        losses[1]=losses[1]*2
 
     return torch.mean(torch.stack(losses))
 
 # from skimage import measure
 class Eval_FP():
     def __init__(self):
-        self._threshold=.5
+        self._threshold=.3
         self._n_received_samples=0
         self._c=2
         self._tp_per_class: List[float] = np.zeros((self._c,), dtype=int)
         self._fp_per_class: List[float] = np.zeros_like(self._tp_per_class)
         self._fn_per_class: List[float] = np.zeros_like(self._tp_per_class)
-        self._tp_fn_threshold=0.1
+        self._tp_fn_threshold=0.08
         pass
     def eval(self,prediction,ground_truth):
         # fill this 
@@ -161,12 +163,10 @@ class Eval_FP():
         for c in range(1, self._c):
             preds_c = (preds == c).astype(int)
             ground_truths_c = (ground_truths == c).astype(int)
+            preds_c=morphology.binary_erosion(preds_c,np.ones((1,1,4,4)))
+            preds_c=morphology.binary_dilation(preds_c,np.ones((1,1,8,8)))
+            preds_c=morphology.binary_erosion(preds_c,np.ones((1,1,4,4)))
             
-            preds_c = morphology.erosion(preds_c)
-            preds_c = morphology.dilation(preds_c)
-            preds_c = morphology.dilation(preds_c)
-            preds_c = morphology.erosion(preds_c)
-
             for gt, pd in zip(ground_truths_c, preds_c):
                 self._n_received_samples += 1
                 gt_labels = measure.label(gt)

@@ -39,7 +39,22 @@ torch.cuda.manual_seed_all(12345)
 
 
 """#Model"""
-eval_read_model_result=lambda a: a[0]
+def log_eval(dice_score,eval,message):
+    r=eval._tp_per_class[1]/(eval._tp_per_class[1]+eval._fn_per_class[1])
+    p=eval._tp_per_class[1]/(eval._tp_per_class[1]+eval._fp_per_class[1])
+    logging.info(
+        f'''
+        {message} Dice score: {dice_score}
+        '_tp':{eval._tp_per_class[1]},
+        '_fp':{eval._fp_per_class[1]},
+        '_fn':{eval._fn_per_class[1]},
+        'Recall':{r},
+        'Precision':{p},
+        'F1':{2*p*r/(p+r)},
+        'F2':{5*p*r/(4*p+r)},
+        '_n_received_samples':{eval._n_received_samples},
+        ''')
+
 
 class UDAModule(nn.Module):
     def __init__(self, n_channels, n_classes, bilinear=False):
@@ -282,7 +297,6 @@ def train_model(
                                                                  ).mean()
                     loss_disc = criterion2(labels_pred, labels.unsqueeze(1),)
                     loss_adv = criterion2(labels_pred, 1-labels.unsqueeze(1),)
-
                 def step_optimizer(optimizer, loss, retain_graph=True):
                     optimizer.zero_grad()
                     loss.backward(retain_graph=retain_graph)
@@ -313,7 +327,7 @@ def train_model(
                                     'loss_adv(batch)': loss_adv.item(),
                                     })
                 # Evaluation round
-                division_step = (n_train // (1*batch_size))
+                division_step = (n_train // (10*batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
@@ -325,16 +339,10 @@ def train_model(
                             if value.grad is not None and not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
                                 histograms['Gradients/' +
                                            tag] = wandb.Histogram(value.grad.data.cpu())
-                        val_score, eval = evaluate(
-                            model, val_loader, device, amp,read_model_result=eval_read_model_result)
-                        logging.info(
-                            f'''
-                            Validation Dice score: {val_score}
-                            '_tp':{eval._tp_per_class[1]},
-                            '_fp':{eval._fp_per_class[1]},
-                            '_fn':{eval._fn_per_class[1]},
-                            '_n_received_samples':{eval._n_received_samples},
-                            ''')
+                        dice_score, eval = evaluate(
+                            model, val_loader, device, amp)
+                        log_eval(dice_score,eval,f"Evaluation epoch:{epoch}")            
+
                         model.eval()
                         source = {}
                         target = {}
@@ -375,17 +383,18 @@ def train_model(
                             'learning rate enc': optimizer_enc.param_groups[0]['lr'],
                             'learning rate dec': optimizer_dec.param_groups[0]['lr'],
                             'learning rate vgg': optimizer_vgg.param_groups[0]['lr'],
-                            'validation Dice': val_score,
-                            '_tp_0': eval._tp_per_class[0],
-                            '_fp_0': eval._fp_per_class[0],
-                            '_fn_0': eval._fn_per_class[0],
-                            '_n_received_samples': eval._n_received_samples,
                             'source': source,
                             'step': global_step,
                             'epoch': epoch,
                             **histograms
                         })
                         model.train()
+                        if dir_checkpoint:
+                            state_dict = model.state_dict()
+                            torch.save(state_dict, os_support_path(
+                                str(dir_checkpoint + f'checkpoint_epoch{epoch}temp{global_step//division_step}.pth')))
+                            logging.info(f'Checkpoint {epoch} saved!')
+
 
         if dir_checkpoint:
             state_dict = model.state_dict()
@@ -395,7 +404,8 @@ def train_model(
 
 def test_model(
     device,
-    dir_checkpoint
+    dir_checkpoint,
+    load_recentliest=True,
 ):
     test_source_dataset = CoupledDataset(dir_1="Vin/",
                                          dir_1_sep="Vin/sep/V1/",
@@ -422,7 +432,7 @@ def test_model(
     n_s = len(test_source_dataset)
     n_t = len(test_target_dataset)
 
-    loader_args = dict(batch_size=16,)
+    loader_args = dict(batch_size=1,)
     test_source_loader = torch.utils.data.DataLoader(dataset=test_source_dataset,
                                                      num_workers=1,
                                                      shuffle=False, **loader_args, collate_fn=collate_fn_couple)
@@ -431,6 +441,23 @@ def test_model(
                                                      shuffle=False, **loader_args, collate_fn=collate_fn_couple)
     model = UDAModule(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
+    
+    if load_recentliest:
+        
+        file=load_recentliest_file(dir_checkpoint)
+        state_dict = torch.load(file, map_location=device)
+        model.load_state_dict(state_dict)
+        logging.info(f'Model loaded from {file} epoch{-1}')
+        model.to(device)
+
+
+        def test(model,loader,device,message,is_source):    
+            dice_score, eval = evaluate(
+                model, loader, device, True,is_source)
+            log_eval(dice_score,eval,message)
+        test(model,test_source_loader,device,message=f"Test Source epoch {-1}",is_source=True)
+        test(model,test_target_loader,device,message=f"Test Target epoch {-1}",is_source=False)        
+        return
     
     files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
     for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:-a[1]):
@@ -442,18 +469,12 @@ def test_model(
 
         def test(model,loader,device,message,is_source):    
             dice_score, eval = evaluate(
-                model, loader, device, True,is_source ,read_model_result=eval_read_model_result)
-            logging.info(
-                f'''
-                {message} Dice score: {dice_score}
-                '_tp':{eval._tp_per_class[1]},
-                '_fp':{eval._fp_per_class[1]},
-                '_fn':{eval._fn_per_class[1]},
-                '_n_received_samples':{eval._n_received_samples},
-                ''')
+                model, loader, device, True,is_source)
+            log_eval(dice_score,eval,message)
         test(model,test_source_loader,device,message=f"Test Source epoch {epoch}",is_source=True)
         test(model,test_target_loader,device,message=f"Test Target epoch {epoch}",is_source=False)
 
+import sys
         
 
 if __name__ == '__main__':
@@ -462,22 +483,29 @@ if __name__ == '__main__':
             pass
 
     args = Temp()
-    args.Test=True
+    args.Test=sys.argv[1]=='True'
     args.load = True
     args.amp = False
     args.classes = 1
     args.scale = 1
-    args.batch_size = 10
+    args.batch_size = 4
     args.bilinear = False
     args.epochs = 5
     args.dir_checkpoint = "Model/vgg_unet2/"
-    args.lr = 1e-5
+    args.lr = 1e-4
     args.amp = False
 
     logging.basicConfig(level=logging.INFO,
                         format='%(levelname)s: %(message)s')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
+    if args.Test:
+        test_model(
+            device=device,
+            dir_checkpoint=args.dir_checkpoint,
+        )
+        exit()
+
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
@@ -501,11 +529,6 @@ if __name__ == '__main__':
             current_epoch = 1
 
     model.to(device=device)
-    if args.Test:
-        test_model(
-            device=device,
-            dir_checkpoint=args.dir_checkpoint,
-        )
     train_model(
         model=model,
         current_epoch=current_epoch,

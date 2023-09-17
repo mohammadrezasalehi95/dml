@@ -71,7 +71,21 @@ torch.cuda.manual_seed_all(12345)
 
 """#Model"""
 
-
+def log_eval(dice_score,eval,message):
+    r=eval._tp_per_class[1]/(eval._tp_per_class[1]+eval._fn_per_class[1])
+    p=eval._tp_per_class[1]/(eval._tp_per_class[1]+eval._fp_per_class[1])
+    logging.info(
+        f'''
+        {message} Dice score: {dice_score}
+        '_tp':{eval._tp_per_class[1]},
+        '_fp':{eval._fp_per_class[1]},
+        '_fn':{eval._fn_per_class[1]},
+        'Recall':{r},
+        'Precision':{p},
+        'F1':{2*p*r/(p+r)},
+        'F2':{5*p*r/(4*p+r)},
+        '_n_received_samples':{eval._n_received_samples},
+        ''')
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
@@ -265,7 +279,7 @@ def train_model(
                                    # target_transform=target_tr,
                                    phase='train',
                                    # wandb_ex=experiment,
-                                   fix_to_first=True,
+                                   fix_to_first=False,
                                    )
     val_dataset = CoupledDataset(dir_1="Vin/",
                                  dir_1_sep="Vin/sep/V1/",
@@ -285,30 +299,18 @@ def train_model(
                                          dir_2_sep="DDSM/sep/ORG/",
                                          # transform=target_tr,
                                          # target_transform=target_tr,
-                                         phase='val2',
+                                         phase='val2'
                                          # wandb_ex=experiment,
                                          )
-    test_dataset_s = CoupledDataset(dir_1="Vin/",
+    test_dataset = CoupledDataset(dir_1="Vin/",
                                   dir_1_sep="Vin/sep/V1/",
                                   size="512/",
                                   dir_2="DDSM/",
                                   dir_2_sep="DDSM/sep/ORG/",
                                   # transform=target_tr,
                                   # target_transform=target_tr,
-                                  phase='test',
+                                  phase='test'
                                   # wandb_ex=experiment,
-                                  fix_to_first=False,
-                                  )
-    test_dataset_t = CoupledDataset(dir_1="Vin/",
-                                  dir_1_sep="Vin/sep/V1/",
-                                  size="512/",
-                                  dir_2="DDSM/",
-                                  dir_2_sep="DDSM/sep/ORG/",
-                                  # transform=target_tr,
-                                  # target_transform=target_tr,
-                                  phase='test',
-                                  # wandb_ex=experiment,
-                                  fix_to_first=True,
                                   )
 
     n_train = len(train_dataset)
@@ -322,10 +324,8 @@ def train_model(
         dataset=val_dataset, shuffle=False, drop_last=True, **loader_args,num_workers=1)
     val_showing_loader = torch.utils.data.DataLoader(
         dataset=val_showing_dataset, shuffle=False, **loader_args,num_workers=1)
-    test_loader_s = torch.utils.data.DataLoader(
-        dataset=test_dataset_s, shuffle=False, drop_last=True, **loader_args,num_workers=1)
-    test_loader_t = torch.utils.data.DataLoader(
-        dataset=test_dataset_t, shuffle=False, drop_last=True, **loader_args,num_workers=1)
+    test_loader = torch.utils.data.DataLoader(
+        dataset=test_dataset, shuffle=False, drop_last=True, **loader_args,num_workers=1)
 
     # (Initialize logging)
     experiment = wandb.init(project='Unet',
@@ -347,8 +347,8 @@ def train_model(
     ''')
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    optimizer = optim.RMSprop(model.parameters(),
-                              lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
+    optimizer_seg = optim.Adam(model.parameters(),
+                              lr=learning_rate,)
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
@@ -365,7 +365,6 @@ def train_model(
                     f'Network has been defined with {model.n_channels} input channels, ' \
                     f'but loaded images have {images.shape[1]} channels. Please check that ' \
                     'the images are loaded correctly.'
-
                 images = images.to(
                     device=device, dtype=torch.float32, memory_format=torch.channels_last)
                 true_masks = true_masks.to(device=device, dtype=torch.long)
@@ -373,24 +372,26 @@ def train_model(
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred = model(images)
                     if model.n_classes == 1:
-                        loss = balanced_focal_cross_entropy_loss(
+                        loss_seg = balanced_focal_cross_entropy_loss(
                             masks_pred, true_masks, focal_gamma=2).mean()
                     else:
-                        return 
+                        return
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                def step_optimizer(optimizer, loss, retain_graph=True):
+                    optimizer.zero_grad()
+                    loss.backward(retain_graph=retain_graph)
+                    optimizer.step()
+                step_optimizer(optimizer_seg, loss_seg, retain_graph=True)
 
                 pbar.update(images.shape[0])
                 global_step += 1
-                epoch_loss += loss.item()
+                epoch_loss += loss_seg.item()
                 experiment.log({
-                    'train loss': loss.item(),
+                    'loss seg': loss_seg.item(),
                     'step': global_step,
                     'epoch': epoch
                 })
-                pbar.set_postfix(**{'loss (batch)': loss.item()})
+                pbar.set_postfix(**{'loss_seg (batch)': loss_seg.item()})
                 # Evaluation round
                 division_step = (n_train // (1 * batch_size))
                 if division_step > 0:
@@ -405,72 +406,55 @@ def train_model(
                                 histograms['Gradients/' +
                                            tag] = wandb.Histogram(value.grad.data.cpu())
 
-                        s_score,s_eval = evaluate(
-                            model, test_loader_s, device, amp)
-                        t_score,t_eval = evaluate(
-                            model, test_loader_t, device, amp)
+                        dice_score,eval = evaluate(
+                            model, val_loader, device, amp)
+                        log_eval(dice_score,eval,f"Evaluation epoch:{epoch}")
                         # scheduler.step(val_score)
-                        logging.info(
-                            f'''
-                            source Dice score: {s_score}
-                            '_tp':{s_eval._tp_per_class[1]},
-                            '_fp':{s_eval._fp_per_class[1]},
-                            '_fn':{s_eval._fn_per_class[1]},
-                            '_n_received_samples':{s_eval._n_received_samples},
-                            ''')
-                        logging.info(
-                            f'''
-                            target Dice score: {t_score}
-                            '_tp':{t_eval._tp_per_class[1]},
-                            '_fp':{t_eval._fp_per_class[1]},
-                            '_fn':{t_eval._fn_per_class[1]},
-                            '_n_received_samples':{t_eval._n_received_samples},
-                            ''')
                         model.eval()
                         source = {}
                         target = {}
                         step_showing = 0
-                        for batch in val_showing_loader:
-                            images_src, images_tr, mask_src, mask_tr = batch
-                            # pmax=lambda a:np.min(a.numpy())
-                            # print("dddddddddddddddddd",pmax(images_src),pmax(images_tr),pmax(mask_src),pmax(mask_tr))
-                            images_src = images_src.to(
-                                device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                            images_tr = images_tr.to(
-                                device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                            pmasks_src = model(images_src)
-                            pmasks_tr = model(images_tr)
-                            images_src=images_src.cpu()
-                            pmasks_src7=(pmasks_src >= 0.7).float().cpu()
-                            pmasks_src=(pmasks_src >= 0.5).float().cpu()
-                            images_tr=images_tr.cpu()
-                            pmasks_tr7=(pmasks_tr >= 0.7).float().cpu()
-                            pmasks_tr=(pmasks_tr >= 0.5).float().cpu()
-                            listing_image=lambda images:[wandb.Image(transforms.ToPILImage()(image), caption="An example image") for image in images]
-                            source.update({
-                                f'image': listing_image(images_src),
-                                f'mask': listing_image(mask_src.float()),
-                                f'pmask5': listing_image(pmasks_src),
-                                f'pmask7': listing_image(pmasks_src7),
-                            })
-                            target.update({
-                                f't_image': listing_image(images_tr),
-                                f't_mask': listing_image(mask_tr.float()),
-                                f't_pmask5': listing_image(pmasks_tr),
-                                f't_pmask7': listing_image(pmasks_tr7),
-                            })
-                            break
+                        # for batch in val_showing_loader:
+                        #     images_src, images_tr, mask_src, mask_tr = batch
+                        #     # pmax=lambda a:np.min(a.numpy())
+                        #     # print("dddddddddddddddddd",pmax(images_src),pmax(images_tr),pmax(mask_src),pmax(mask_tr))
+                        #     images_src = images_src.to(
+                        #         device=device, dtype=torch.float32, memory_format=torch.channels_last)
+                        #     images_tr = images_tr.to(
+                        #         device=device, dtype=torch.float32, memory_format=torch.channels_last)
+                        #     pmasks_src = model(images_src)
+                        #     pmasks_tr = model(images_tr)
+                        #     images_src=images_src.cpu()
+                        #     pmasks_src7=(pmasks_src >= 0.7).float().cpu()
+                        #     pmasks_src=(pmasks_src >= 0.5).float().cpu()
+                        #     images_tr=images_tr.cpu()
+                        #     pmasks_tr7=(pmasks_tr >= 0.7).float().cpu()
+                        #     pmasks_tr=(pmasks_tr >= 0.5).float().cpu()
+                        #     listing_image=lambda images:[wandb.Image(transforms.ToPILImage()(image), caption="An example image") for image in images]
+                        #     source.update({
+                        #         f'image': listing_image(images_src),
+                        #         f'mask': listing_image(mask_src.float()),
+                        #         f'pmask5': listing_image(pmasks_src),
+                        #         f'pmask7': listing_image(pmasks_src7),
+                        #     })
+                        #     target.update({
+                        #         f't_image': listing_image(images_tr),
+                        #         f't_mask': listing_image(mask_tr.float()),
+                        #         f't_pmask5': listing_image(pmasks_tr),
+                        #         f't_pmask7': listing_image(pmasks_tr7),
+                        #     })
+                        #     break
                             # step_showing+=batch_size
-                        # experiment.log({
-                        #     'validation Dice': val_score,
-                        #     '_tp':eval._tp_per_class[1],
-                        #     '_fp':eval._fp_per_class[1],
-                        #     '_fn':eval._fn_per_class[1],
-                        #     'source': source,
-                        #     'step': global_step,
-                        #     'epoch': epoch,
-                        #     **histograms
-                        # })
+                        experiment.log({
+                            'validation Dice': val_score,
+                            '_tp':eval._tp_per_class[1],
+                            '_fp':eval._fp_per_class[1],
+                            '_fn':eval._fn_per_class[1],
+                            'source': source,
+                            'step': global_step,
+                            'epoch': epoch,
+                            **histograms
+                        })
                         model.train()
         if dir_checkpoint:
 
@@ -478,6 +462,7 @@ def train_model(
             torch.save(state_dict, os_support_path(
                 str(dir_checkpoint + f'checkpoint_epoch{epoch}.pth')))
             logging.info(f'Checkpoint {epoch} saved!')
+
 
 def test_model(
     device,
@@ -517,7 +502,7 @@ def test_model(
                                                      shuffle=False, **loader_args, collate_fn=collate_fn)
     model = UNet(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
-    
+
     files = glob.glob(os_support_path(dir_checkpoint)+"*.pth")
     for file, epoch  in sorted([(file, get_epoch_from_filename(file)) for file in files],key=lambda a:-a[1]):
         state_dict = torch.load(file, map_location=device)
@@ -525,20 +510,15 @@ def test_model(
         logging.info(f'Model loaded from {file} epoch{epoch}')
         model.to(device)
 
-
         def test(model,loader,device,message,is_source):    
             dice_score, eval = evaluate(
-                model, loader, device, True,is_source )
-            logging.info(
-                f'''
-                {message} Dice score: {dice_score}
-                '_tp':{eval._tp_per_class[1]},
-                '_fp':{eval._fp_per_class[1]},
-                '_fn':{eval._fn_per_class[1]},
-                '_n_received_samples':{eval._n_received_samples},
-                ''')
+                model, loader, device, True,is_source)
+            log_eval(dice_score,eval,message)            
         test(model,test_source_loader,device,message=f"Test Source epoch {epoch}",is_source=True)
         test(model,test_target_loader,device,message=f"Test Target epoch {epoch}",is_source=False)
+
+import sys
+        
 
 if __name__ == '__main__':
     class Temp:
@@ -546,16 +526,17 @@ if __name__ == '__main__':
             pass
 
     args = Temp()
-    args.Test=False
+    args.Test=sys.argv[1]=='True'
+
     args.load = True
     args.amp = False
     args.classes = 1
     args.scale = 1
-    args.batch_size = 10
+    args.batch_size = 4
     args.bilinear = False
     args.epochs = 10
     args.dir_checkpoint = "Model/unet3/"
-    args.lr = 1e-4
+    args.lr = 1e-5
     args.amp = False
 
     torch.cuda.device_count()
@@ -572,6 +553,7 @@ if __name__ == '__main__':
             device=device,
             dir_checkpoint=args.dir_checkpoint,
         )
+
     model = UNet(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
 
