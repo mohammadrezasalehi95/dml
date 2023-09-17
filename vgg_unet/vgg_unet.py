@@ -331,7 +331,7 @@ def train_model(
                                     'loss_adv(batch)': loss_adv.item(),
                                     })
                 # Evaluation round
-                division_step = (n_train // (3*batch_size))
+                division_step = (n_train // (2*batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
@@ -445,15 +445,12 @@ def test_model(
                                                      shuffle=False, **loader_args, collate_fn=collate_fn_couple)
     model = UDAModule(n_channels=1, n_classes=1)
     model = model.to(memory_format=torch.channels_last)
-    
     if load_recentliest:
-        
         file=load_recentliest_file(dir_checkpoint)
         state_dict = torch.load(file, map_location=device)
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {file} epoch{-1}')
         model.to(device)
-
 
         def test(model,loader,device,message,is_source):    
             dice_score, eval = evaluate(
