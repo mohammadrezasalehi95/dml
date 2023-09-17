@@ -258,58 +258,6 @@ class ResnetGenerator(nn.Module):
         return x
 
 
-class GeneratorResnet9blocks(nn.Module):
-    def __init__(self, ngf=64, output_nc=1, skip=False):
-        super(GeneratorResnet9blocks, self).__init__()
-
-        # Define the reflection padding
-        self.pad = nn.ReflectionPad2d(3)
-
-        # Define the downsample convolutions
-        self.conv1 = GeneralConv2D_GA(
-            3, ngf, 7, stride=1, padding="valid", do_norm=True, do_relu=True, norm_type='Ins')
-        self.conv2 = GeneralConv2D_GA(
-            ngf, ngf * 2, 3, stride=2, padding="same", do_norm=True, do_relu=True, norm_type='Ins')
-        self.conv3 = GeneralConv2D_GA(
-            ngf * 2, ngf * 4, 3, stride=2, padding="same", do_norm=True, do_relu=True, norm_type='Ins')
-
-        # Define the ResNet blocks
-        self.resnet_blocks = nn.Sequential(
-            *[ResnetBlock(ngf * 4) for _ in range(9)]
-        )
-
-        # Define the upsample convolutions
-        self.deconv1 = GeneralDeconv2D(
-            ngf * 4, ngf * 2, 3, stride=2, padding="same", do_norm=True, do_relu=True, norm_type='Ins')
-        self.deconv2 = GeneralDeconv2D(
-            ngf * 2, ngf, 3, stride=2, padding="same", do_norm=True, do_relu=True, norm_type='Ins')
-        self.conv4 = GeneralConv2D_GA(
-            ngf, output_nc, 7, stride=1, padding="valid", do_norm=False, do_relu=False)
-
-        self.skip = skip
-
-    def forward(self, inputgen, inputimg):
-        # Apply padding
-        x = self.pad(inputgen)
-
-        # Apply downsample convolutions
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-
-        # Apply ResNet blocks
-        x = self.resnet_blocks(x)
-
-        # Apply upsample convolutions
-        x = self.deconv1(x)
-        x = self.deconv2(x)
-        x = self.conv4(x)
-
-        # Apply skip connection if required
-        if self.skip:
-            return torch.tanh(inputimg + x)
-        else:
-            return torch.tanh(x)
 
 
 class Decoder(nn.Module):

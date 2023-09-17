@@ -32,7 +32,6 @@ def dice(conf_matrix):
             dic[ii] = 2.0 * hit / (pp + gp)
     return dic
 
-
 def dice_eval(compact_pred, labels, n_class):
     dice_arr = []
     dice = 0
