@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch
 from torch import Tensor
 from typing import Optional
-from skimage import measure
+from skimage import measure,morphology
 import csv
 import os
 import glob
@@ -108,9 +108,7 @@ def balanced_focal_cross_entropy_loss(
     # flattening and bringing class channel o index 0
     probs = probs.transpose(0, 1).flatten(1)  # C N
     gt = gt.flatten(0)  # N
-
     c = probs.shape[0]
-
     gt_related_prob = probs[gt, torch.arange(gt.shape[0])]
 
     losses = []
@@ -121,9 +119,7 @@ def balanced_focal_cross_entropy_loss(
 
     for ci in range(c):
         c_probs = gt_related_prob[gt == ci]
-
         if torch.numel(c_probs) > 0:
-
             if focal_gamma == 1:
                 losses.append(F.binary_cross_entropy(
                     c_probs,
@@ -136,19 +132,20 @@ def balanced_focal_cross_entropy_loss(
                         c_probs,
                         torch.ones_like(c_probs),
                         weight=w))
-
+    if len(losses)==2:
+        losses[1]=losses[1]*2
     return torch.mean(torch.stack(losses))
 
 # from skimage import measure
 class Eval_FP():
     def __init__(self):
-        self._threshold=.5
+        self._threshold=.3
         self._n_received_samples=0
         self._c=2
         self._tp_per_class: List[float] = np.zeros((self._c,), dtype=int)
         self._fp_per_class: List[float] = np.zeros_like(self._tp_per_class)
         self._fn_per_class: List[float] = np.zeros_like(self._tp_per_class)
-        self._tp_fn_threshold=0.1
+        self._tp_fn_threshold=0.08
         pass
     def eval(self,prediction,ground_truth):
         # fill this 
@@ -161,6 +158,9 @@ class Eval_FP():
         for c in range(1, self._c):
             preds_c = (preds == c).astype(int)
             ground_truths_c = (ground_truths == c).astype(int)
+            preds_c=morphology.binary_erosion(preds_c,np.ones((1,1,4,4)))
+            preds_c=morphology.binary_dilation(preds_c,np.ones((1,1,8,8)))
+            preds_c=morphology.binary_erosion(preds_c,np.ones((1,1,4,4)))
             
             for gt, pd in zip(ground_truths_c, preds_c):
                 self._n_received_samples += 1
