@@ -331,7 +331,7 @@ def train_model(
                                     'loss_adv(batch)': loss_adv.item(),
                                     })
                 # Evaluation round
-                division_step = (n_train // (10*batch_size))
+                division_step = (n_train // (3*batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
@@ -495,7 +495,7 @@ if __name__ == '__main__':
     args.batch_size = 4
     args.bilinear = False
     args.epochs = 5
-    args.dir_checkpoint = "Model/vgg_unet2/"
+    args.dir_checkpoint = "Model/vgg_unet3/"
     args.lr = 1e-4
     args.amp = False
 

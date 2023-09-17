@@ -446,7 +446,7 @@ def train_model(
                         #     break
                             # step_showing+=batch_size
                         experiment.log({
-                            'validation Dice': val_score,
+                            # 'validation Dice': val_score,
                             '_tp':eval._tp_per_class[1],
                             '_fp':eval._fp_per_class[1],
                             '_fn':eval._fn_per_class[1],
@@ -535,7 +535,7 @@ if __name__ == '__main__':
     args.batch_size = 4
     args.bilinear = False
     args.epochs = 10
-    args.dir_checkpoint = "Model/unet3/"
+    args.dir_checkpoint = "Model/unet4/"
     args.lr = 1e-5
     args.amp = False
 
